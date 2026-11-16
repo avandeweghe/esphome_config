@@ -1,0 +1,235 @@
+# Gosund SW1 1-gang wall switch (ESP8266).
+# Same features as athom-sw01.yaml: power-on state, button mode
+# (Relay / Programmable with click events). Red LED = off, green LED = on.
+# Pins: GPIO0 button (inverted), GPIO14 relay, GPIO2 green LED, GPIO16 red LED (both inverted).
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "gosund-sw1"
+  # Default friendly name
+  friendly_name: "SW1 Switch"
+  # Allows ESP device to be automatically linked to an 'Area' in Home Assistant
+  room: ""
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Gosund SW1 1-gang wall switch"
+  # Project Name
+  project_name: "Gosund.SW1"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+  # Restore the relay upon reboot to state:
+  light_restore_mode: RESTORE_DEFAULT_OFF
+  # Name of the main light entity. "None" = just the device name (light.<device>)
+  light_name: "None"
+
+esphome:
+  comment: "${device_description}"
+  area: "${room}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+  on_boot:
+    - priority: 600
+      then:
+        - select.set_index:
+            id: power_mode
+            index: !lambda |-
+                    return id(restore_mode)-1;
+        - lambda: |-
+              switch(id(restore_mode))
+              {
+              case 1:{
+                      id(light1).turn_off();
+                      break;
+                            }
+              case 2:{
+                      id(light1).turn_on();
+                      break;
+                            }
+              default:{
+                      break;
+                            }
+              }
+
+esp8266:
+  board: esp01_1m
+  # Keep saved settings (light state, Power On State) through a power cut
+  restore_from_flash: true
+
+globals:
+  - id: restore_mode
+    type: int
+    restore_value: yes
+    initial_value: "3"
+
+select:
+  - platform: template
+    name: "Power On State"
+    id: "power_mode"
+    # Default: keep the light as it was before power was lost
+    initial_option: Restore Power Off State
+    restore_value: true
+    optimistic: true
+    options:
+      - Always Off
+      - Always On
+      - Restore Power Off State
+    on_value:
+      then:
+        - lambda: |-
+            id(restore_mode)=i+1;
+
+  - platform: template
+    name: "Button Mode"
+    id: button_mode
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_option: Relay
+    options:
+      - Relay
+      - Programmable
+
+event:
+  - platform: template
+    name: "Button Event"
+    id: button_event
+    device_class: button
+    event_types:
+      - single_click
+      - double_click
+      - long_press
+
+binary_sensor:
+  #Button
+  - platform: gpio
+    pin:
+      inverted: true
+      number: GPIO0
+      mode:
+        input: true
+        pullup: true
+    name: "Button"
+    id: button1
+    disabled_by_default: true
+    filters:
+      - delayed_on_off: 20ms
+    on_multi_click:
+      # Keep the original local relay controls in Relay mode.
+      - timing:
+          - ON for at most 0.5s
+          - OFF for at least 0.2s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Relay
+              then:
+                - light.toggle: light1
+      - timing:
+          - ON for at least 8s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Relay
+              then:
+                - button.press: Reset
+
+      # In Programmable mode, the button reports events without toggling the relay.
+      # Strictly below 1s / 300ms keeps the click and long-press windows separate.
+      - timing:
+          - ON for at most 999ms
+          - OFF for at most 299ms
+          - ON for at most 999ms
+          - OFF for at least 300ms
+        invalid_cooldown: 0s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Programmable
+              then:
+                - event.trigger:
+                    id: button_event
+                    event_type: double_click
+      - timing:
+          - ON for at most 999ms
+          - OFF for at least 300ms
+        invalid_cooldown: 0s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Programmable
+              then:
+                - event.trigger:
+                    id: button_event
+                    event_type: single_click
+      - timing:
+          - ON for at least 1s
+        invalid_cooldown: 0s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Programmable
+              then:
+                - event.trigger:
+                    id: button_event
+                    event_type: long_press
+      # Hold 8 s for a factory reset (same as Relay mode).
+      - timing:
+          - ON for at least 8s
+        invalid_cooldown: 0s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Programmable
+              then:
+                - button.press: Reset
+
+output:
+  # Relay
+  - platform: gpio
+    pin: GPIO14
+    id: relay1
+
+switch:
+  # Indicator LEDs (internal): green when the light is on, red when it is off
+  - platform: gpio
+    id: ledG
+    pin:
+      number: GPIO2
+      inverted: True
+  - platform: gpio
+    id: ledR
+    pin:
+      number: GPIO16
+      inverted: True
+
+light:
+  # Relay: the main light, shown with just the device name
+  - platform: binary
+    name: ${light_name}
+    id: light1
+    output: relay1
+    restore_mode: ${light_restore_mode}
+    on_turn_on:
+      - switch.turn_off: ledR
+      - switch.turn_on: ledG
+    on_turn_off:
+      - switch.turn_off: ledG
+      - switch.turn_on: ledR
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/gosund-sw1.yaml@main
