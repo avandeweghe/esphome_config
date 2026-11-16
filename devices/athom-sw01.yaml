@@ -127,7 +127,7 @@ binary_sensor:
               then:
                 - light.toggle: light1
       - timing:
-          - ON for at least 4s
+          - ON for at least 8s
         then:
           - if:
               condition:
@@ -182,9 +182,9 @@ binary_sensor:
                 - event.trigger:
                     id: button_event
                     event_type: long_press
-      # Keep a physical recovery gesture, with extra time for programmable holds.
+      # Hold 8 s for a factory reset (same as Relay mode).
       - timing:
-          - ON for at least 10s
+          - ON for at least 8s
         invalid_cooldown: 0s
         then:
           - if:
