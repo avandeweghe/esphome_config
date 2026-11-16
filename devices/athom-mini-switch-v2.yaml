@@ -89,6 +89,10 @@ globals:
     type: int
     restore_value: yes
     initial_value: "3"
+  - id: total_energy
+    type: float
+    restore_value: yes
+    initial_value: '0.0'
 
 select:
   - platform: template
@@ -128,10 +132,6 @@ event:
       - double_click
       - long_press
 
-  - id: total_energy
-    type: float
-    restore_value: yes
-    initial_value: '0.0'
 
 binary_sensor:
   # Wired wall switch: any change toggles the light
