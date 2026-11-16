@@ -16,7 +16,7 @@ substitutions:
   # Description as appears in ESPHome & top of webserver page
   device_description: "athom esp32-c3 1gang switch"
   # Project Name
-  project_name: "China Athom Technology.1Gang Switch"
+  project_name: "IoTorero.SW13"
   # Projection version denotes the release version of the yaml file, allowing checking of deployed vs latest version
   project_version: "v3.0.7"
   # Restore the relay (GPO switch) upon reboot to state:
