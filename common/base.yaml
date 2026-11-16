@@ -46,7 +46,7 @@ mdns:
 web_server:
   # https://esphome.io/components/web_server/
   id: web_server_component
-  port: 80
+  port: 8080
   auth:
     type: digest
     username: !secret web_username

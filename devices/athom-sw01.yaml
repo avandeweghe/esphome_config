@@ -65,6 +65,9 @@ select:
   - platform: template
     name: "Power On State"
     id: "power_mode"
+    # Default: keep the light as it was before power was lost
+    initial_option: Restore Power Off State
+    restore_value: true
     optimistic: true
     options:
       - Always Off
