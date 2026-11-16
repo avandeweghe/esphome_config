@@ -77,6 +77,10 @@ esp32:
       # Extend the watchdog timeout, so the device reboots if the device appears locked up for over 10 seconds.
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
 
+# Save state (energy totals, relay, settings) to flash every 15 min instead of every minute
+preferences:
+  flash_write_interval: 15min
+
 uart:
   rx_pin: GPIO20
   baud_rate: 4800
