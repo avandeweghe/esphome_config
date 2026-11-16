@@ -1,0 +1,49 @@
+# Martin Jerry MJ-ST02 3-way smart switch (ESP8266 + Tuya MCU)
+# The Tuya MCU handles the paddle, 3-way traveller and relay; the ESP talks to it
+# over the hardware UART, so there are no GPIO buttons or LEDs to configure here.
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "mj-st02"
+  # Default friendly name
+  friendly_name: "3-Way Switch"
+  # Allows ESP device to be automatically linked to an 'Area' in Home Assistant
+  room: ""
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Martin Jerry MJ-ST02 3-way switch (Tuya MCU)"
+  # Project Name
+  project_name: "MartinJerry.MJ-ST02"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+  # Name of the main light entity. "None" = just the device name (light.<device>)
+  light_name: "None"
+
+esphome:
+  comment: "${device_description}"
+  area: "${room}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+
+esp8266:
+  board: esp01_1m
+
+# The Tuya MCU uses the hardware UART (GPIO1/3); logging stays off it (baud_rate: 0 in base)
+uart:
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+
+tuya:
+
+light:
+  - platform: tuya
+    name: ${light_name}
+    id: light1
+    switch_datapoint: 1
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/mj-st02.yaml@main
