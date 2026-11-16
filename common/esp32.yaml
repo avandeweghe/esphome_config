@@ -1,0 +1,7 @@
+# ESP32-family extras (any variant with an internal temperature sensor).
+# Include with:  esp32: !include ../common/esp32.yaml
+sensor:
+  - platform: internal_temperature
+    name: "Internal Temperature"
+    id: internal_temp
+    entity_category: "diagnostic"
