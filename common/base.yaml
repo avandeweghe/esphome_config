@@ -20,7 +20,8 @@ esphome:
 
 preferences:
   id: preferences_component
-  flash_write_interval: 1min
+  # Save state to flash every 15 min (fewer flash writes; power outages are rare)
+  flash_write_interval: 15min
 
 api:
   id: api_component
