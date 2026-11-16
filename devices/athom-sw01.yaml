@@ -1,0 +1,93 @@
+# Athom SW01 1-gang touch wall switch (ESP8266, ESP8285 1MB)
+# https://github.com/athom-tech/athom-configs
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "athom-sw01"
+  # Default friendly name
+  friendly_name: "SW01 Switch"
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Athom SW01 1-gang touch switch"
+  # Project Name
+  project_name: "Athom.SW01"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+  # Restore the relay upon reboot to state:
+  light_restore_mode: RESTORE_DEFAULT_OFF
+
+esphome:
+  comment: "${device_description}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+
+esp8266:
+  board: esp01_1m
+
+binary_sensor:
+  # Touch Button
+  - platform: gpio
+    pin:
+      inverted: true
+      number: GPIO3
+      mode:
+        input: true
+        pullup: true
+    name: "Button"
+    id: button1
+    disabled_by_default: true
+    on_multi_click:
+      # Hold 5 s to restart
+      - timing:
+          - ON for at least 5s
+        then:
+          - button.press: id_restart
+    on_click:
+      then:
+        - light.toggle: light1
+
+output:
+  # Relay
+  - platform: gpio
+    pin: GPIO13
+    id: relay1
+
+  # Button LED (1.0 = Blue / 0.0 = Red)
+  - platform: esp8266_pwm
+    pin: GPIO14
+    inverted: true
+    id: button_led1
+
+light:
+  - platform: status_led
+    name: "Status LED"
+    id: red_led
+    disabled_by_default: true
+    pin:
+      number: GPIO0
+      inverted: true
+
+  # Relay: the main light, shown with just the device name
+  - platform: binary
+    name: None
+    id: light1
+    output: relay1
+    restore_mode: ${light_restore_mode}
+    on_turn_on:
+      - light.turn_on: led1
+    on_turn_off:
+      - light.turn_off: led1
+
+  # Button LED
+  - platform: monochromatic
+    name: "LED"
+    disabled_by_default: true
+    id: led1
+    output: button_led1
+    default_transition_length: 500ms
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/athom-sw01.yaml@main
