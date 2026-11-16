@@ -1,0 +1,94 @@
+# Athom PG03 smart plug (ESP8266, HLW8012) used only as a power monitor
+# (washer / dryer). The relay is forced on and cannot be switched off from the
+# plug's button, Home Assistant or the web page, so the appliance always has power.
+# The HLW8012 calibration below was measured on these plugs.
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "athom-pg03-monitor"
+  # Default friendly name
+  friendly_name: "Power Monitor"
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Athom PG03 plug as a power monitor (relay always on)"
+  # Project Name
+  project_name: "Athom.PG03-Monitor"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+
+esphome:
+  comment: "${device_description}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+
+esp8266:
+  board: esp01_1m
+
+# Relay: always on. Internal (no name), so it never shows in Home Assistant, and
+# if anything ever turns it off it switches straight back on.
+# The plug's button (GPIO3) is deliberately not configured, so it does nothing.
+switch:
+  - platform: gpio
+    pin: GPIO14
+    id: relay
+    restore_mode: ALWAYS_ON
+    on_turn_off:
+      - switch.turn_on: relay
+
+sensor:
+  - platform: hlw8012
+    sel_pin:
+      number: GPIO12
+      inverted: True
+    cf_pin: GPIO4
+    cf1_pin: GPIO5
+    voltage_divider: 780
+    current:
+      name: "Current"
+      filters:
+        - calibrate_linear:
+            - 0.0000 -> 0.0110 # Relay off no load
+            - 0.0097 -> 0.0260 # Relay on no load
+            - 0.9270 -> 0.7570
+            - 2.0133 -> 1.6330
+            - 2.9307 -> 2.3750
+            - 5.4848 -> 4.4210
+            - 8.4308 -> 6.8330
+            - 9.9171 -> 7.9830
+        # Normalize for plug load
+        - lambda: if (x < 0.0260) return 0; else return (x - 0.0260);
+    voltage:
+      name: "Voltage"
+
+    power:
+      name: "Power"
+      id: socket_my_power
+      unit_of_measurement: W
+      filters:
+        - calibrate_linear:
+            - 0.0000 -> 0.5900 # Relay off no load
+            - 0.0000 -> 1.5600 # Relay on no load
+            - 198.5129 -> 87.8300
+            - 434.2469 -> 189.5000
+            - 628.6241 -> 273.9000
+            - 1067.0067 -> 460.1000
+            - 1619.8098 -> 699.2000
+            - 2043.0282 -> 885.0000
+        # Normalize for plug load
+        - lambda: if (x < 1.5600) return 0; else return (x - 1.5600);
+    change_mode_every: 1
+    update_interval: 5s
+
+  - platform: total_daily_energy
+    name: "Total Daily Energy"
+    power_id: socket_my_power
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/athom-pg03-monitor.yaml@main
