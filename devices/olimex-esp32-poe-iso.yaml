@@ -17,8 +17,6 @@ substitutions:
   project_name: "Olimex.ESP32-POE-ISO"
   # Release version of this yaml file
   project_version: "v1.0.0"
-  # A dedicated proxy starts with Bluetooth on
-  bt_proxy_restore_mode: RESTORE_DEFAULT_ON
 
 esphome:
   comment: "${device_description}"
