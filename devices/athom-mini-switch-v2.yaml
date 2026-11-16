@@ -1,0 +1,356 @@
+# Athom Mini Switch V2 (ESP32-C3) with CSE7766 power monitoring
+# Same features as devices/athom-sw13.yaml: power-on state, button mode
+# (Relay / Programmable with click events), Bluetooth proxy switch, Improv.
+# https://github.com/athom-tech/esp32-configs
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+  esp32: !include ../common/esp32.yaml
+  bt_proxy: !include ../common/bt-proxy.yaml
+  improv: !include ../common/improv.yaml
+
+substitutions:
+  # Default name
+  name: "athom-mini-switch"
+  # Default friendly name
+  friendly_name: "Mini Switch"
+  # Allows ESP device to be automatically linked to an 'Area' in Home Assistant
+  room: ""
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Athom Mini Switch V2 (ESP32-C3)"
+  # Project Name
+  project_name: "Athom.Mini-Switch-V2"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+  # Restore the relay upon reboot to state:
+  light_restore_mode: RESTORE_DEFAULT_OFF
+  # Name of the main light entity. "None" = just the device name (light.<device>)
+  light_name: "None"
+  # Set the update interval for power sensors
+  sensor_update_interval: 10s
+  # Turn the relay off above this current (A)
+  current_limit: "10"
+
+esphome:
+  comment: "${device_description}"
+  area: "${room}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+  on_boot:
+    - priority: 600
+      then:
+        - select.set_index:
+            id: power_mode
+            index: !lambda |-
+                    return id(restore_mode)-1;
+        - lambda: |-
+              switch(id(restore_mode))
+              {
+              case 1:{
+                      id(light1).turn_off();
+                      break;
+                            }
+              case 2:{
+                      id(light1).turn_on();
+                      break;
+                            }
+              default:{
+                      break;
+                            }
+              }
+
+esp32:
+  board: esp32-c3-devkitm-1
+  flash_size: 4MB
+  flash_mode: dio
+  variant: ESP32C3
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # @grigi found in testing that these options resulted in better responsiveness.
+      # BLE 4.2 is supported by ALL ESP32 boards that have bluetooth, the original and derivatives.
+      CONFIG_BT_BLE_42_FEATURES_SUPPORTED: y
+      # Also enable this on any derivative boards (S2, C3 etc) but not the original ESP32.
+      CONFIG_BT_BLE_50_FEATURES_SUPPORTED: y
+      # Extend the watchdog timeout, so the device reboots if the device appears locked up for over 10 seconds.
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+
+uart:
+  rx_pin: GPIO20
+  baud_rate: 4800
+  data_bits: 8
+  stop_bits: 1
+  parity: EVEN
+
+globals:
+  - id: restore_mode
+    type: int
+    restore_value: yes
+    initial_value: "3"
+
+select:
+  - platform: template
+    name: "Power On State"
+    id: "power_mode"
+    # Default: keep the light as it was before power was lost
+    initial_option: Restore Power Off State
+    restore_value: true
+    optimistic: true
+    options:
+      - Always Off
+      - Always On
+      - Restore Power Off State
+    on_value:
+      then:
+        - lambda: |-
+            id(restore_mode)=i+1;
+
+  - platform: template
+    name: "Button Mode"
+    id: button_mode
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_option: Relay
+    options:
+      - Relay
+      - Programmable
+
+event:
+  - platform: template
+    name: "Button Event"
+    id: button_event
+    device_class: button
+    event_types:
+      - single_click
+      - double_click
+      - long_press
+
+  - id: total_energy
+    type: float
+    restore_value: yes
+    initial_value: '0.0'
+
+binary_sensor:
+  # Wired wall switch: any change toggles the light
+  - platform: gpio
+    id: the_switch
+    name: "Power Switch"
+    disabled_by_default: true
+    pin:
+      number: GPIO4
+      mode: INPUT_PULLUP
+    on_state:
+      - light.toggle: light1
+    on_multi_click:
+      # Flip the wall switch 4 times quickly to restart
+      - timing:
+          - ON for at most 0.5s
+          - OFF for at most 0.5s
+          - ON for at most 0.5s
+          - OFF for at most 0.5s
+          - ON for at most 0.5s
+          - OFF for at most 0.5s
+          - ON for at most 0.5s
+          - OFF for at most 0.5s
+        then:
+          - button.press: id_restart
+
+  # Button on the module
+  - platform: gpio
+    pin:
+      inverted: true
+      number: GPIO3
+      mode:
+        input: true
+        pullup: true
+    name: "Button"
+    id: button1
+    disabled_by_default: true
+    filters:
+      - delayed_on_off: 20ms
+    on_multi_click:
+      # Keep the original local relay controls in Relay mode.
+      - timing:
+          - ON for at most 0.5s
+          - OFF for at least 0.2s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Relay
+              then:
+                - light.toggle: light1
+      - timing:
+          - ON for at least 4s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Relay
+              then:
+                - button.press: Reset
+
+      # In Programmable mode, the button reports events without toggling the relay.
+      # Strictly below 1s / 300ms keeps the click and long-press windows separate.
+      - timing:
+          - ON for at most 999ms
+          - OFF for at most 299ms
+          - ON for at most 999ms
+          - OFF for at least 300ms
+        invalid_cooldown: 0s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Programmable
+              then:
+                - event.trigger:
+                    id: button_event
+                    event_type: double_click
+      - timing:
+          - ON for at most 999ms
+          - OFF for at least 300ms
+        invalid_cooldown: 0s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Programmable
+              then:
+                - event.trigger:
+                    id: button_event
+                    event_type: single_click
+      - timing:
+          - ON for at least 1s
+        invalid_cooldown: 0s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Programmable
+              then:
+                - event.trigger:
+                    id: button_event
+                    event_type: long_press
+      # Keep a physical recovery gesture, with extra time for programmable holds.
+      - timing:
+          - ON for at least 10s
+        invalid_cooldown: 0s
+        then:
+          - if:
+              condition:
+                select.is:
+                  id: button_mode
+                  options: Programmable
+              then:
+                - button.press: Reset
+
+output:
+  # Relay
+  - platform: gpio
+    id: relay1
+    pin: GPIO6
+
+light:
+  - platform: status_led
+    name: "Status LED"
+    id: blue_led
+    icon: mdi:lightbulb-outline
+    disabled_by_default: true
+    pin:
+      number: GPIO7
+      inverted: true
+
+  # Relay
+  - platform: binary
+    name: ${light_name}
+    id: light1
+    output: relay1
+    restore_mode: ${light_restore_mode}
+
+sensor:
+  - platform: cse7766
+    id: athom_cse7766
+    current:
+      name: "Current"
+      filters:
+        - throttle_average: ${sensor_update_interval}
+        - lambda: if (x < 0.060) return 0.0; else return x;   # the chip reports a little current with no load
+      on_value_range:
+        - above: ${current_limit}
+          then:
+            - light.turn_off: light1
+
+    voltage:
+      name: "Voltage"
+      filters:
+        - throttle_average: ${sensor_update_interval}
+
+    power:
+      name: "Power"
+      id: power_sensor
+      filters:
+        - throttle_average: ${sensor_update_interval}
+        - lambda: if (x < 3.0) return 0.0; else return x;    # the chip reports < 3 W with no load
+
+    energy:
+      name: "Energy"
+      id: energy
+      unit_of_measurement: kWh
+      filters:
+        - throttle: ${sensor_update_interval}
+        # W to kW
+        - multiply: 0.001
+      on_value:
+        then:
+          - lambda: |-
+              static float previous_energy_value = 0.0;
+              float current_energy_value = id(energy).state;
+              id(total_energy) += current_energy_value - previous_energy_value;
+              previous_energy_value = current_energy_value;
+              id(total_energy_sensor).update();
+
+    apparent_power:
+      name: "Apparent Power"
+      filters:
+        - throttle_average: ${sensor_update_interval}
+    reactive_power:
+      name: "Reactive Power"
+      filters:
+        - throttle_average: ${sensor_update_interval}
+    power_factor:
+      name: "Power Factor"
+      filters:
+        - throttle_average: ${sensor_update_interval}
+
+  - platform: template
+    name: "Total Energy"
+    id: total_energy_sensor
+    unit_of_measurement: kWh
+    device_class: "energy"
+    state_class: "total_increasing"
+    icon: "mdi:lightning-bolt"
+    accuracy_decimals: 3
+    lambda: |-
+      return id(total_energy);
+    update_interval: ${sensor_update_interval}
+
+  - platform: total_daily_energy
+    name: "Total Energy Today"
+    restore: true
+    power_id: power_sensor
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/athom-mini-switch-v2.yaml@main
