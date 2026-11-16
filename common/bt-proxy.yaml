@@ -4,6 +4,8 @@
 substitutions:
   # RESTORE_DEFAULT_OFF or RESTORE_DEFAULT_ON (dedicated proxies)
   bt_proxy_restore_mode: RESTORE_DEFAULT_OFF
+  # true hides the Bluetooth Proxy switch in Home Assistant (dedicated proxies)
+  bt_proxy_switch_disabled: "false"
 
 api:
   # Only enable BLE tracking when wifi is up and api is connected
@@ -48,6 +50,7 @@ switch:
   - platform: template
     name: "Bluetooth Proxy"
     id: bluetooth_proxy_switch
+    disabled_by_default: ${bt_proxy_switch_disabled}
     icon: mdi:bluetooth
     entity_category: config
     optimistic: true
