@@ -153,6 +153,8 @@ improv_ble:
 
 esp32_ble:
   id: esp32_ble_component
+  # Off until the Bluetooth Proxy switch turns it on
+  enable_on_boot: false
 
 esp32_ble_tracker:
   id: esp32_ble_tracker_component
@@ -177,7 +179,7 @@ switch:
     icon: mdi:bluetooth
     entity_category: config
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action:
       - ble.enable:
       - if:
