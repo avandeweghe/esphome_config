@@ -1,0 +1,364 @@
+# Tuya XT-V2 water leak sensor (BK7231N, 2 x AAA), Bluetooth (BTHome) version.
+#
+# Normal wake (water, button or timer):
+#   boot -> BLE stack -> BTHome broadcast (LED blinks) -> ~1.5 s -> deep sleep.
+#   Sleeps until the water state CHANGES (dry->wet or wet->dry), the button is
+#   pressed, or 24 h pass (daily heartbeat with battery level).
+#   Wi-Fi stays OFF; there is no API. Home Assistant gets the readings through
+#   the Bluetooth proxies (BTHome integration).
+# Update mode: hold the button 5 s while it's awake (press it to wake, keep
+#   holding). It reboots into a Wi-Fi-only boot (no Bluetooth), LED solid, OTA
+#   for 10 min or until the button is pressed, then sleep.
+#
+# BTHome data: moisture, battery %, button press, and "count" = ms from boot to
+# first broadcast (for measuring wake time).
+#
+# Pins (OpenBeken template, confirmed): P16 water probe (active high), P20 button
+# (active LOW: idles high, press pulls to ground),
+# P17 battery divider enable, P23 battery ADC, P26 LED (active HIGH).
+#
+# Each device file sets name, friendly_name and ble_name (the BTHome local name).
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "water-sensor"
+  # Default friendly name
+  friendly_name: "Water Sensor"
+  # BTHome local name broadcast over Bluetooth
+  ble_name: "Leak"
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Tuya XT-V2 water leak sensor (BK7231N, BTHome)"
+  # Project Name
+  project_name: "Tuya.XT-V2-BTHome"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+
+esphome:
+  comment: "${device_description}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+  platformio_options:
+    # Turn Beken's Bluetooth stack back on (ESPHome sets this option to 0
+    # itself, so ours must be a list to merge).
+    custom_options.sys_config#h:
+      - "CFG_SUPPORT_BLE = 1"
+  on_boot:
+    - priority: 200
+      then:
+        # Wi-Fi starts normally at boot (OTA needs the network stack: with Wi-Fi
+        # off from boot, OTA's setup crashes the chip).
+        # First boot after an install: stay in update mode (Wi-Fi on, 10 min) so
+        # a broken button hold can still be fixed over the air.
+        # Every other wake: switch Wi-Fi off right here, before it connects.
+        - if:
+            condition:
+              lambda: |-
+                // Build stamp differs from the one saved in flash = new firmware.
+                uint32_t build = fnv1_hash(__DATE__ " " __TIME__);
+                if (build == id(last_build)) return false;
+                id(last_build) = build;
+                return true;
+            then:
+              - globals.set: { id: in_update, value: "true" }
+        # Update mode requested by a 5 s button hold (set, then rebooted).
+        - if:
+            condition:
+              lambda: 'return id(update_req);'
+            then:
+              - globals.set: { id: update_req, value: "false" }
+              - globals.set: { id: in_update, value: "true" }
+        # Update mode is a clean Wi-Fi-only boot: Bluetooth never starts, so
+        # nothing competes with Wi-Fi for the shared radio.
+        - if:
+            condition:
+              lambda: 'return id(in_update);'
+            then:
+              - script.execute: update_mode
+            else:
+              - wifi.disable:
+    - priority: -100
+      then:
+        # Read the battery once per wake-up.
+        - output.turn_on: bat_enable
+        - delay: 100ms
+        - component.update: battery_voltage
+        - output.turn_off: bat_enable
+        # Normal wake: start Bluetooth (from the main loop, not during setup).
+        - if:
+            condition:
+              lambda: 'return !id(in_update);'
+            then:
+              - delay: 1ms
+              - bthome_beken.start: ble
+
+bk72xx:
+  board: generic-bk7231n-qfn32-tuya
+  framework:
+    uart_port: 1
+
+api:
+  # The API only runs in update mode (Wi-Fi is off otherwise), so never reboot
+  # for having no Home Assistant connection. The ESPHome device shows as
+  # unavailable while the sensor sleeps; that is normal.
+  reboot_timeout: 0s
+
+# Overrides of common/base.yaml for a battery sensor.
+
+# Same flash-save interval as before the move to common/base.yaml (state is
+# also saved explicitly before every reboot/deep sleep).
+preferences:
+  flash_write_interval: 1min
+
+# Logs on UART1 (TX1 = P11), where the USB serial adapter (COM4) is attached.
+logger:
+  hardware_uart: UART1
+  baud_rate: 115200
+
+wifi:
+  fast_connect: true
+  # Starts at boot (see on_boot), switched off straight away unless in update
+  # mode. Never reboot for being offline.
+  reboot_timeout: 0s
+
+button:
+  # https://esphome.io/components/button/template/
+  - platform: template
+    name: "Sleep Now"
+    icon: mdi:sleep
+    on_press:
+      - logger.log: "Sleep now pressed in Home Assistant"
+      - script.stop: update_mode
+      - script.execute:
+          id: sleep_now
+          minutes: 1440
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/avandeweghe/esphome-bthome-beken
+      ref: main
+    refresh: 0s
+    components: [bthome_beken]
+
+output:
+  - platform: gpio
+    id: bat_enable
+    pin: P17
+  - platform: gpio
+    id: led
+    # Active HIGH on this board (the OpenBeken template's WifiLED_n is wrong).
+    pin: P26
+
+binary_sensor:
+  - platform: gpio
+    id: water_leak
+    internal: true
+    pin:
+      number: P16
+      mode:
+        input: true
+        pulldown: true
+      allow_other_uses: true
+    filters:
+      # P16 reads high briefly at boot; require 300 ms of "wet" so wakes don't
+      # report a false wet->dry flicker.
+      - delayed_on: 300ms
+  - platform: gpio
+    id: side_button
+    internal: true
+    pin:
+      number: P20
+      mode:
+        input: true
+        pullup: true
+      # Active low: the pin idles high and the button pulls it to ground.
+      inverted: true
+      allow_other_uses: true
+    on_press:
+      - bthome_beken.button_event:
+          type: press
+
+sensor:
+  - platform: adc
+    id: battery_voltage
+    internal: true
+    pin: ADC3
+    # Average 16 readings per wake: a single sample scattered by ~0.05 V.
+    samples: 16
+    update_interval: never
+    filters:
+      # Divider ratio (OpenBeken default), then a straight-line fit from a
+      # bench-supply sweep (16-sample averages, 2026-11-13): reads ~0.04 V low.
+      - multiply: 2.29
+      - calibrate_linear:
+          method: least_squares
+          datapoints:
+            - 2.986 -> 3.0
+            - 2.741 -> 2.8
+            - 2.576 -> 2.6
+            - 2.329 -> 2.4
+            - 2.169 -> 2.2
+    on_value:
+      - logger.log:
+          format: "Battery %.3f V"
+          args: [x]
+      - component.update: battery_level
+  - platform: template
+    id: battery_level
+    internal: true
+    update_interval: never
+    # 2 x AAA: 2.2 V empty, 3.0 V full
+    lambda: |-
+      float v = id(battery_voltage).state;
+      if (isnan(v)) return {};
+      return clamp((v - 2.2f) / (3.0f - 2.2f) * 100.0f, 0.0f, 100.0f);
+
+bthome_beken:
+  id: ble
+  auto_start: false
+  local_name: "${ble_name}"
+  moisture: water_leak
+  battery: battery_level
+  adv_interval: 50ms
+  on_packet:
+    # Restart the broadcast window after every new packet, so the latest change
+    # always gets the full 1.5 s on air before sleep.
+    - if:
+        condition:
+          script.is_running: report_then_sleep
+        then:
+          - script.execute: report_then_sleep
+    # Short blink for every packet sent (not in update mode, where it's solid).
+    - if:
+        condition:
+          not:
+            script.is_running: update_mode
+        then:
+          - output.turn_on: led
+          - delay: 60ms
+          - output.turn_off: led
+  on_broadcast:
+    - script.execute: report_then_sleep
+
+interval:
+  # Update mode: keep the LED solid (a packet blink can otherwise switch it off).
+  - interval: 500ms
+    then:
+      - if:
+          condition:
+            script.is_running: update_mode
+          then:
+            - output.turn_on: led
+
+globals:
+  - id: update_req
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: in_update
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: last_build
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+
+script:
+  - id: report_then_sleep
+    mode: restart
+    then:
+      # ~30 advertisements (50 ms apart). At its spot only btproxy01 hears it
+      # (avg -76 dBm, fades to -93), so a longer window rides out short fades.
+      # Repeats share a packet id, so Home Assistant drops the duplicates.
+      - delay: 1500ms
+      # Held button: if it's still down 5 s later, go to update mode instead.
+      - if:
+          condition:
+            binary_sensor.is_on: side_button
+          then:
+            - wait_until:
+                condition:
+                  binary_sensor.is_off: side_button
+                timeout: 5s
+            - if:
+                condition:
+                  binary_sensor.is_on: side_button
+                then:
+                  # Reboot into a Wi-Fi-only update boot.
+                  - logger.log: "Button held: rebooting into update mode"
+                  - lambda: |-
+                      id(update_req) = true;
+                      global_preferences->sync();
+                      App.safe_reboot();
+      - if:
+          condition:
+            script.is_running: update_mode
+          then:
+            - logger.log: "Update mode, staying awake"
+          else:
+            # Next wake: water changes, button press, or the daily heartbeat.
+            - script.execute:
+                id: sleep_now
+                minutes: 1440
+
+  - id: update_mode
+    mode: single
+    then:
+      - logger.log: "Update mode: Wi-Fi on for 10 min (press the button to end it)"
+      - output.turn_on: led
+      - wifi.enable:
+      # Let go of the hold that started it, then one press ends it early.
+      - wait_until:
+          condition:
+            binary_sensor.is_off: side_button
+          timeout: 8s
+      - wait_until:
+          condition:
+            binary_sensor.is_on: side_button
+          timeout: 5min
+      - logger.log: "Update mode over"
+      - script.execute:
+          id: sleep_now
+          minutes: 1440
+
+  - id: sleep_now
+    mode: single
+    parameters:
+      minutes: int
+    then:
+      - output.turn_off: led
+      - deep_sleep.enter:
+          id: sleep_ctl
+          sleep_duration: !lambda 'return (uint32_t) minutes * 60000;'
+
+deep_sleep:
+  id: sleep_ctl
+  sleep_duration: 24h
+  wakeup_pin:
+    # Water probe: wake on a CHANGE. INVERT_WAKEUP flips the wake level to the
+    # opposite of the pin's state at sleep time (dry -> wake when wet,
+    # wet -> wake when dry), so a long leak doesn't keep waking the sensor.
+    # (IGNORE isn't implemented on BK72xx: a wet probe woke it instantly.)
+    - pin:
+        number: P16
+        mode:
+          input: true
+          pulldown: true
+        allow_other_uses: true
+      wakeup_pin_mode: INVERT_WAKEUP
+    # Button: wakes when pressed (pulls the pin low).
+    - pin:
+        number: P20
+        mode:
+          input: true
+          pullup: true
+        inverted: true
+        allow_other_uses: true
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/tuya-xt-v2-bthome.yaml@main
