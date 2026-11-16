@@ -1,0 +1,148 @@
+# Aukey SH-PA3 dual-outlet smart plug (ESP8266, no power monitoring).
+# One button: short press (< 0.4 s) toggles outlet 1, longer press (0.5-5 s)
+# toggles outlet 2, hold 8 s for a factory reset.
+# Pins: GPIO15 outlet 1 relay, GPIO12 outlet 2 relay, GPIO5 button (inverted).
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "aukey-sh-pa3"
+  # Default friendly name
+  friendly_name: "Dual Plug"
+  # Allows ESP device to be automatically linked to an 'Area' in Home Assistant
+  room: ""
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Aukey SH-PA3 dual-outlet smart plug"
+  # Project Name
+  project_name: "Aukey.SH-PA3"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+  # Names of the two outlet switches in Home Assistant
+  outlet1_name: "Outlet 1"
+  outlet2_name: "Outlet 2"
+
+esphome:
+  comment: "${device_description}"
+  area: "${room}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+  on_boot:
+    - priority: 600
+      then:
+        - select.set_index:
+            id: power_mode1
+            index: !lambda 'return id(restore_mode1)-1;'
+        - select.set_index:
+            id: power_mode2
+            index: !lambda 'return id(restore_mode2)-1;'
+        - lambda: |-
+            if (id(restore_mode1) == 1) id(socket1).turn_off();
+            if (id(restore_mode1) == 2) id(socket1).turn_on();
+            if (id(restore_mode2) == 1) id(socket2).turn_off();
+            if (id(restore_mode2) == 2) id(socket2).turn_on();
+
+esp8266:
+  board: esp01_1m
+  # Keep saved settings (outlet states, Power On State) through a power cut
+  restore_from_flash: true
+
+globals:
+  - id: restore_mode1
+    type: int
+    restore_value: yes
+    initial_value: "3"
+  - id: restore_mode2
+    type: int
+    restore_value: yes
+    initial_value: "3"
+
+select:
+  - platform: template
+    name: "${outlet1_name} Power On State"
+    id: power_mode1
+    # Default: keep the outlet as it was before power was lost
+    initial_option: Restore Power Off State
+    restore_value: true
+    optimistic: true
+    options:
+      - Always Off
+      - Always On
+      - Restore Power Off State
+    on_value:
+      then:
+        - lambda: 'id(restore_mode1) = i + 1;'
+  - platform: template
+    name: "${outlet2_name} Power On State"
+    id: power_mode2
+    initial_option: Restore Power Off State
+    restore_value: true
+    optimistic: true
+    options:
+      - Always Off
+      - Always On
+      - Restore Power Off State
+    on_value:
+      then:
+        - lambda: 'id(restore_mode2) = i + 1;'
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO5
+      inverted: True
+    id: power_button
+    on_multi_click:
+      # Short press: outlet 1
+      - timing:
+          - ON for at most 0.4s
+          - OFF for at least 0.2s
+        then:
+          - switch.toggle: switch1
+      # Longer press: outlet 2
+      - timing:
+          - ON for 0.5s to 5s
+          - OFF for at least 0.2s
+        then:
+          - switch.toggle: switch2
+      # Hold 8 s: factory reset
+      - timing:
+          - ON for at least 8s
+        then:
+          - button.press: Reset
+
+switch:
+  # Relays (internal); Home Assistant uses the outlet switches below
+  - platform: gpio
+    id: socket1
+    restore_mode: RESTORE_DEFAULT_OFF
+    pin:
+      number: GPIO15
+  - platform: gpio
+    id: socket2
+    restore_mode: RESTORE_DEFAULT_OFF
+    pin:
+      number: GPIO12
+  - platform: template
+    id: switch1
+    icon: mdi:power-socket-us
+    name: "${outlet1_name}"
+    lambda: 'return id(socket1).state;'
+    turn_on_action:
+      - switch.turn_on: socket1
+    turn_off_action:
+      - switch.turn_off: socket1
+  - platform: template
+    id: switch2
+    icon: mdi:power-socket-us
+    name: "${outlet2_name}"
+    lambda: 'return id(socket2).state;'
+    turn_on_action:
+      - switch.turn_on: socket2
+    turn_off_action:
+      - switch.turn_off: socket2
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/aukey-sh-pa3.yaml@main
