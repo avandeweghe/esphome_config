@@ -1,0 +1,94 @@
+# Custom 3-zone sprinkler controller (Wemos D1 mini + relay board).
+# Only one zone runs at a time (interlock); each zone shuts off after 60 min.
+# Pins: D4 zone 1, D3 zone 2, D2 zone 3 (relays active LOW).
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "sprinkler"
+  # Default friendly name
+  friendly_name: "Sprinkler"
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Custom 3-zone sprinkler controller (D1 mini)"
+  # Project Name
+  project_name: "Custom.Sprinkler"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+
+esphome:
+  comment: "${device_description}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+
+esp8266:
+  board: d1_mini
+
+switch:
+  - platform: gpio
+    id: zone1
+    interlock: &interlock_group [zone1, zone2, zone3]
+    pin:
+      number: D4
+      inverted: yes
+  - platform: template
+    name: "Zone 1"
+    lambda: |-
+      if (id(zone1).state) {
+        return true;
+      } else {
+        return false;
+      }
+    icon: "mdi:water"
+    turn_on_action:
+    - switch.turn_on: zone1
+    - delay: 60min
+    - switch.turn_off: zone1
+    turn_off_action:
+    - switch.turn_off: zone1
+  - platform: gpio
+    id: zone2
+    interlock: *interlock_group
+    pin:
+      number: D3
+      inverted: yes
+  - platform: template
+    name: "Zone 2"
+    lambda: |-
+      if (id(zone2).state) {
+        return true;
+      } else {
+        return false;
+      }
+    icon: "mdi:water"
+    turn_on_action:
+    - switch.turn_on: zone2
+    - delay: 60min
+    - switch.turn_off: zone2
+    turn_off_action:
+    - switch.turn_off: zone2
+  - platform: gpio
+    id: zone3
+    interlock: *interlock_group
+    pin:
+      number: D2
+      inverted: yes
+  - platform: template
+    name: "Zone 3"
+    lambda: |-
+      if (id(zone3).state) {
+        return true;
+      } else {
+        return false;
+      }
+    icon: "mdi:water"
+    turn_on_action:
+    - switch.turn_on: zone3
+    - delay: 60min
+    - switch.turn_off: zone3
+    turn_off_action:
+    - switch.turn_off: zone3
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/custom-sprinkler.yaml@main

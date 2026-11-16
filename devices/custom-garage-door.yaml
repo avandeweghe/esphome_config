@@ -1,0 +1,91 @@
+# Custom garage door opener (ESP8266): a relay pulses the opener's button
+# contacts and a reed switch reports open/closed.
+# Pins: GPIO12 relay, GPIO4 reed switch, GPIO13 status LED (inverted).
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "garage-door"
+  # Default friendly name
+  friendly_name: "Garage Door"
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Custom garage door opener (relay pulse + reed switch)"
+  # Project Name
+  project_name: "Custom.Garage-Door"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+
+esphome:
+  comment: "${device_description}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+
+esp8266:
+  board: esp01_1m
+
+output:
+  - platform: gpio
+    pin: 
+      number: GPIO12
+      inverted: no
+    id: relay
+
+status_led:
+  pin:
+    number: GPIO13
+    inverted: true
+    
+binary_sensor:
+  - platform: gpio
+    pin: GPIO4
+    name: "Sensor"
+    icon: mdi:garage
+    id: reedswitch
+    device_class: garage_door
+    internal: true
+    filters:
+      # Ignore contact bounce / flicker as the magnet passes the reed switch
+      - delayed_on_off: 500ms
+
+script:
+  # https://esphome.io/components/script/
+  - id: pulse_relay
+    mode: single        # extra presses during a pulse are ignored
+    then:
+      - output.turn_on: relay
+      - delay: 0.5s
+      - output.turn_off: relay
+
+cover:
+  - platform: template
+    name: None
+    icon: mdi:garage
+    device_class: garage
+    lambda: |-
+      if (id(reedswitch).state) {
+        return cover::COVER_OPEN;
+      } else {
+        return cover::COVER_CLOSED;
+      }
+    open_action:
+      # Only pulse when the door reads closed; pulsing an open door would close it
+      - if:
+          condition:
+            binary_sensor.is_off: reedswitch
+          then:
+            - script.execute: pulse_relay
+    close_action:
+      # Only pulse when the door reads open
+      - if:
+          condition:
+            binary_sensor.is_on: reedswitch
+          then:
+            - script.execute: pulse_relay
+    stop_action:
+      - output.turn_off: relay
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/custom-garage-door.yaml@main
