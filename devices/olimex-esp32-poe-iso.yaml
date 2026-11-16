@@ -1,0 +1,66 @@
+# Olimex ESP32-POE-ISO (wired Ethernet, LAN8720 PHY) used as a dedicated Bluetooth proxy.
+# https://www.olimex.com/Products/IoT/ESP32/ESP32-POE-ISO/
+packages:
+  base: !include ../common/base.yaml
+  ethernet: !include ../common/ethernet.yaml
+  esp32: !include ../common/esp32.yaml
+  bt_proxy: !include ../common/bt-proxy.yaml
+
+substitutions:
+  # Default name
+  name: "btproxy"
+  # Default friendly name
+  friendly_name: "Bluetooth Proxy"
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Olimex ESP32-POE-ISO Bluetooth proxy"
+  # Project Name
+  project_name: "Olimex.ESP32-POE-ISO"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+  # A dedicated proxy starts with Bluetooth on
+  bt_proxy_restore_mode: RESTORE_DEFAULT_ON
+
+esphome:
+  comment: "${device_description}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+
+esp32:
+  board: esp32-poe-iso
+  variant: ESP32
+  framework:
+    type: esp-idf
+    advanced:
+      minimum_chip_revision: "3.1"
+      sram1_as_iram: true
+      flash_chip: generic
+
+ethernet:
+  type: LAN8720
+  mdc_pin: GPIO23
+  mdio_pin: GPIO18
+  clk:
+    pin: GPIO17
+    mode: CLK_OUT
+  phy_addr: 0
+  power_pin: GPIO12
+
+ota:
+  # Allow bootloader / partition table updates over the air
+  - id: !extend ota_esphome
+    allow_partition_access: true
+
+# Wired with plenty of RAM: allow more simultaneous BLE connections
+esp32_ble:
+  max_connections: 4
+
+esp32_ble_tracker:
+  scan_parameters:
+    window: 320ms
+
+bluetooth_proxy:
+  connection_slots: 4
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/olimex-esp32-poe-iso.yaml@main

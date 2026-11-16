@@ -3,8 +3,10 @@
 # https://github.com/athom-tech/esp32-configs
 packages:
   base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
   esp32: !include ../common/esp32.yaml
   bt_proxy: !include ../common/bt-proxy.yaml
+  improv: !include ../common/improv.yaml
 
 substitutions:
   # Default name

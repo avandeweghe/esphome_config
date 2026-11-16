@@ -1,0 +1,5 @@
+# Wi-Fi setup over Bluetooth (Improv). ESP32 with Bluetooth and Wi-Fi only.
+# Include with:  improv: !include ../common/improv.yaml
+improv_ble:
+  id: improv_ble_component
+  authorizer: none

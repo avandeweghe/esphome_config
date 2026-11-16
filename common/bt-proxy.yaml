@@ -1,6 +1,10 @@
 # Bluetooth proxy with an on/off switch (ESP32 with Bluetooth only).
-# Off by default; the switch state survives reboots.
+# Off by default (set bt_proxy_restore_mode to change); the switch state survives reboots.
 # Include with:  bt_proxy: !include ../common/bt-proxy.yaml
+substitutions:
+  # RESTORE_DEFAULT_OFF or RESTORE_DEFAULT_ON (dedicated proxies)
+  bt_proxy_restore_mode: RESTORE_DEFAULT_OFF
+
 api:
   # Only enable BLE tracking when wifi is up and api is connected
   # Gives single-core ESP32-C3 devices time to manage wifi and authenticate with api
@@ -19,10 +23,6 @@ api:
           api.connected:
       then:
         - esp32_ble_tracker.stop_scan:
-
-improv_ble:
-  id: improv_ble_component
-  authorizer: none
 
 esp32_ble:
   id: esp32_ble_component
@@ -51,7 +51,7 @@ switch:
     icon: mdi:bluetooth
     entity_category: config
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
+    restore_mode: ${bt_proxy_restore_mode}
     turn_on_action:
       - ble.enable:
       - if:
