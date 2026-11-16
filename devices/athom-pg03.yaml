@@ -1,0 +1,179 @@
+# Athom PG03 smart plug (ESP8266, HLW8012 power monitoring), used as a normal plug.
+# The HLW8012 calibration below was measured on these plugs.
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "athom-pg03"
+  # Default friendly name
+  friendly_name: "PG03 Plug"
+  # Allows ESP device to be automatically linked to an 'Area' in Home Assistant
+  room: ""
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Athom PG03 smart plug"
+  # Project Name
+  project_name: "Athom.PG03"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+  # Icon for the plug's on/off switch
+  relay_icon: "mdi:power-socket-us"
+  # Restore the relay upon reboot to state:
+  relay_restore_mode: RESTORE_DEFAULT_OFF
+
+esphome:
+  comment: "${device_description}"
+  area: "${room}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+  on_boot:
+    - priority: 600
+      then:
+        - select.set_index:
+            id: power_mode
+            index: !lambda |-
+                    return id(restore_mode)-1;
+        - lambda: |-
+              switch(id(restore_mode))
+              {
+              case 1:{
+                      id(relay).turn_off();
+                      break;
+                            }
+              case 2:{
+                      id(relay).turn_on();
+                      break;
+                            }
+              default:{
+                      break;
+                            }
+              }
+
+esp8266:
+  board: esp01_1m
+  # Keep saved settings (relay state, Power On State) through a power cut
+  restore_from_flash: true
+
+select:
+  - platform: template
+    name: "Power On State"
+    id: "power_mode"
+    # Default: keep the plug as it was before power was lost
+    initial_option: Restore Power Off State
+    restore_value: true
+    optimistic: true
+    options:
+      - Always Off
+      - Always On
+      - Restore Power Off State
+    on_value:
+      then:
+        - lambda: |-
+            id(restore_mode)=i+1;
+
+globals:
+  - id: restore_mode
+    type: int
+    restore_value: yes
+    initial_value: "3"
+
+binary_sensor:
+  # Plug button: click toggles the relay, hold 8 s for a factory reset
+  - platform: gpio
+    pin:
+      number: 3
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Power Button"
+    id: button1
+    disabled_by_default: true
+    filters:
+      - delayed_on_off: 20ms
+    on_multi_click:
+      - timing:
+          - ON for at most 1s
+          - OFF for at least 0.2s
+        then:
+          - switch.toggle: relay
+      - timing:
+          - ON for at least 8s
+        then:
+          - button.press: Reset
+
+switch:
+  - platform: gpio
+    name: None
+    icon: "${relay_icon}"
+    pin: GPIO14
+    id: relay
+    restore_mode: ${relay_restore_mode}
+    on_turn_on:
+      - light.turn_on: blue_led
+    on_turn_off:
+      - light.turn_off: blue_led
+
+light:
+  - platform: status_led
+    name: "Status LED"
+    id: blue_led
+    disabled_by_default: true
+    pin:
+      inverted: true
+      number: GPIO13
+
+sensor:
+  - platform: hlw8012
+    sel_pin:
+      number: GPIO12
+      inverted: True
+    cf_pin: GPIO4
+    cf1_pin: GPIO5
+    voltage_divider: 780
+    current:
+      name: "Current"
+      filters:
+        - calibrate_linear:
+            - 0.0000 -> 0.0110 # Relay off no load
+            - 0.0097 -> 0.0260 # Relay on no load
+            - 0.9270 -> 0.7570
+            - 2.0133 -> 1.6330
+            - 2.9307 -> 2.3750
+            - 5.4848 -> 4.4210
+            - 8.4308 -> 6.8330
+            - 9.9171 -> 7.9830
+        # Normalize for plug load
+        - lambda: if (x < 0.0260) return 0; else return (x - 0.0260);
+    voltage:
+      name: "Voltage"
+
+    power:
+      name: "Power"
+      id: socket_my_power
+      unit_of_measurement: W
+      filters:
+        - calibrate_linear:
+            - 0.0000 -> 0.5900 # Relay off no load
+            - 0.0000 -> 1.5600 # Relay on no load
+            - 198.5129 -> 87.8300
+            - 434.2469 -> 189.5000
+            - 628.6241 -> 273.9000
+            - 1067.0067 -> 460.1000
+            - 1619.8098 -> 699.2000
+            - 2043.0282 -> 885.0000
+        # Normalize for plug load
+        - lambda: if (x < 1.5600) return 0; else return (x - 1.5600);
+    change_mode_every: 1
+    update_interval: 5s
+
+  - platform: total_daily_energy
+    name: "Total Daily Energy"
+    power_id: socket_my_power
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/athom-pg03.yaml@main

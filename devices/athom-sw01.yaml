@@ -54,6 +54,8 @@ esphome:
 
 esp8266:
   board: esp01_1m
+  # Keep saved settings (light state, Power On State) through a power cut
+  restore_from_flash: true
 
 globals:
   - id: restore_mode
