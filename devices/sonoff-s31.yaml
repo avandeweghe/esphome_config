@@ -1,0 +1,153 @@
+# Sonoff S31 smart plug (ESP8266, CSE7766 power monitoring).
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+
+substitutions:
+  # Default name
+  name: "sonoff-s31"
+  # Default friendly name
+  friendly_name: "S31 Plug"
+  # Allows ESP device to be automatically linked to an 'Area' in Home Assistant
+  room: ""
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Sonoff S31 smart plug"
+  # Project Name
+  project_name: "Sonoff.S31"
+  # Release version of this yaml file
+  project_version: "v1.0.0"
+  # Icon for the plug's on/off switch
+  relay_icon: "mdi:power-socket-us"
+  # Restore the relay upon reboot to state:
+  relay_restore_mode: RESTORE_DEFAULT_OFF
+  # Power sensor reporting interval
+  update_interval: 60s
+
+esphome:
+  comment: "${device_description}"
+  area: "${room}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+  on_boot:
+    - priority: 600
+      then:
+        - select.set_index:
+            id: power_mode
+            index: !lambda |-
+                    return id(restore_mode)-1;
+        - lambda: |-
+              switch(id(restore_mode))
+              {
+              case 1:{
+                      id(relay).turn_off();
+                      break;
+                            }
+              case 2:{
+                      id(relay).turn_on();
+                      break;
+                            }
+              default:{
+                      break;
+                            }
+              }
+
+esp8266:
+  board: esp01_1m
+  # Keep saved settings (relay state, Power On State) through a power cut
+  restore_from_flash: true
+
+select:
+  - platform: template
+    name: "Power On State"
+    id: "power_mode"
+    # Default: keep the plug as it was before power was lost
+    initial_option: Restore Power Off State
+    restore_value: true
+    optimistic: true
+    options:
+      - Always Off
+      - Always On
+      - Restore Power Off State
+    on_value:
+      then:
+        - lambda: |-
+            id(restore_mode)=i+1;
+
+globals:
+  - id: restore_mode
+    type: int
+    restore_value: yes
+    initial_value: "3"
+
+# The CSE7766 power chip is on the hardware UART RX (logging is off it: baud_rate 0 in base)
+uart:
+  rx_pin: RX
+  baud_rate: 4800
+  parity: EVEN
+
+binary_sensor:
+  # Plug button: click toggles the relay, hold 8 s for a factory reset
+  - platform: gpio
+    pin:
+      number: GPIO0
+      mode: INPUT_PULLUP
+      inverted: True
+    name: "Power Button"
+    id: button1
+    filters:
+      - delayed_on_off: 20ms
+    on_multi_click:
+      - timing:
+          - ON for at most 1s
+          - OFF for at least 0.2s
+        then:
+          - switch.toggle: relay
+      - timing:
+          - ON for at least 8s
+        then:
+          - button.press: Reset
+
+switch:
+  - platform: gpio
+    name: None
+    icon: "${relay_icon}"
+    pin: GPIO12
+    id: relay
+    restore_mode: ${relay_restore_mode}
+
+# Blue LED: shows the connection status
+status_led:
+  pin:
+    number: GPIO13
+    inverted: True
+
+sensor:
+  - platform: cse7766
+    current:
+      filters:
+        - throttle_average: ${update_interval}
+      name: "Amps"
+      unit_of_measurement: A
+      accuracy_decimals: 2
+    voltage:
+      filters:
+        - throttle_average: ${update_interval}
+      name: "Voltage"
+      unit_of_measurement: V
+      accuracy_decimals: 1
+    power:
+      filters:
+        - throttle_average: ${update_interval}
+      name: "Watts"
+      accuracy_decimals: 0
+      id: plug_power
+  - platform: total_daily_energy
+    name: "Daily Energy"
+    power_id: plug_power
+    filters:
+      - multiply: 0.001 ## convert Wh to kWh
+    unit_of_measurement: kWh
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/sonoff-s31.yaml@main
