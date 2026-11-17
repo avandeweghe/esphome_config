@@ -1,11 +1,11 @@
 # Bluetooth proxy with an on/off switch (ESP32 with Bluetooth only).
 # The switch only starts/stops proxy scanning; the Bluetooth radio stays on,
 # so Improv over BLE keeps working with the proxy off.
-# Off by default (set bt_proxy_restore_mode to change); the switch state survives reboots.
+# On by default (set bt_proxy_restore_mode to change); the switch state survives reboots.
 # Include with:  bt_proxy: !include ../common/bt-proxy.yaml
 substitutions:
   # RESTORE_DEFAULT_OFF or RESTORE_DEFAULT_ON (dedicated proxies)
-  bt_proxy_restore_mode: RESTORE_DEFAULT_OFF
+  bt_proxy_restore_mode: RESTORE_DEFAULT_ON
   # true hides the Bluetooth Proxy switch in Home Assistant (dedicated proxies)
   bt_proxy_switch_disabled: "false"
 
