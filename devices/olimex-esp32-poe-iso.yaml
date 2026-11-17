@@ -17,9 +17,6 @@ substitutions:
   project_name: "Olimex.ESP32-POE-ISO"
   # Release version of this yaml file
   project_version: "v1.0.0"
-  # A dedicated proxy: Bluetooth on at boot, switch hidden in Home Assistant
-  bt_proxy_restore_mode: RESTORE_DEFAULT_ON
-  bt_proxy_switch_disabled: "true"
 
 esphome:
   comment: "${device_description}"
