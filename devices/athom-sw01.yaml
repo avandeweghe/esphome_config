@@ -115,19 +115,16 @@ binary_sensor:
     disabled_by_default: true
     filters:
       - delayed_on_off: 20ms
+    # Relay mode: toggle the moment the button is pressed (no wait for release / double-click).
+    on_press:
+      - if:
+          condition:
+            select.is:
+              id: button_mode
+              options: Relay
+          then:
+            - light.toggle: light1
     on_multi_click:
-      # Keep the original local relay controls in Relay mode.
-      - timing:
-          - ON for at most 0.5s
-          - OFF for at least 0.2s
-        then:
-          - if:
-              condition:
-                select.is:
-                  id: button_mode
-                  options: Relay
-              then:
-                - light.toggle: light1
       - timing:
           - ON for at least 8s
         then:
