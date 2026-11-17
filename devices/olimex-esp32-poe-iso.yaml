@@ -55,8 +55,6 @@ ota:
 # Wired with plenty of RAM: allow more simultaneous BLE connections
 esp32_ble:
   max_connections: 4
-  # Dedicated proxy: start Bluetooth at boot without waiting for the switch
-  enable_on_boot: true
 
 esp32_ble_tracker:
   scan_parameters:

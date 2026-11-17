@@ -1,6 +1,7 @@
 # Bluetooth proxy with an on/off switch (ESP32 with Bluetooth only).
+# The switch only starts/stops proxy scanning; the Bluetooth radio stays on,
+# so Improv over BLE keeps working with the proxy off.
 # Off by default (set bt_proxy_restore_mode to change); the switch state survives reboots.
-# When the switch is on, Bluetooth starts and scans continuously, like a stock ESPHome proxy.
 # Include with:  bt_proxy: !include ../common/bt-proxy.yaml
 substitutions:
   # RESTORE_DEFAULT_OFF or RESTORE_DEFAULT_ON (dedicated proxies)
@@ -8,17 +9,26 @@ substitutions:
   # true hides the Bluetooth Proxy switch in Home Assistant (dedicated proxies)
   bt_proxy_switch_disabled: "false"
 
+esphome:
+  on_boot:
+    # After everything (Bluetooth included) is set up, start scanning if the switch is on
+    - priority: -100
+      then:
+        - if:
+            condition:
+              switch.is_on: bluetooth_proxy_switch
+            then:
+              - esp32_ble_tracker.start_scan:
+                  continuous: true
+
 esp32_ble:
   id: esp32_ble_component
-  # Off until the Bluetooth Proxy switch turns it on
-  enable_on_boot: false
 
 esp32_ble_tracker:
   id: esp32_ble_tracker_component
   scan_parameters:
-    # Scan whenever Bluetooth is enabled. Starting scans only on api connect
-    # raced with the switch's restore at boot and left the proxy silent.
-    continuous: true
+    # Scanning is started by the Bluetooth Proxy switch, not automatically
+    continuous: false
     active: true  # send scan-request packets to gather more info, like device name for some devices.
     interval: 320ms  # default 320ms - how long to spend on each advert channel
     window:   300ms  # default 30ms - how long to actually "listen" in each interval. Reduce this if device is unstable.
@@ -37,6 +47,7 @@ switch:
     optimistic: true
     restore_mode: ${bt_proxy_restore_mode}
     turn_on_action:
-      - ble.enable:
+      - esp32_ble_tracker.start_scan:
+          continuous: true
     turn_off_action:
-      - ble.disable:
+      - esp32_ble_tracker.stop_scan:
