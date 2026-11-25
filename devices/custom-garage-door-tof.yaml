@@ -25,7 +25,7 @@ substitutions:
   # Project Name
   project_name: "Custom.Garage-Door-ToF"
   # Release version of this yaml file
-  project_version: "v0.3.0"
+  project_version: "v0.4.0"
   # Relay input pin and button-press length
   relay_pin: GPIO4
   relay_pulse: 500ms
@@ -34,6 +34,8 @@ substitutions:
   # I2C pins (shared with the onboard OLED)
   i2c_sda: GPIO5
   i2c_scl: GPIO6
+  # 100kHz for the cable to the remote sensor (keep it under ~1.5 m)
+  i2c_frequency: 100kHz
   # Default calibration distances (m); adjustable from Home Assistant
   closed_distance: "2.40"
   open_distance: "0.35"
@@ -60,7 +62,7 @@ i2c:
   id: bus_a
   sda: ${i2c_sda}
   scl: ${i2c_scl}
-  frequency: 400kHz
+  frequency: ${i2c_frequency}
   scan: true
 
 number:
