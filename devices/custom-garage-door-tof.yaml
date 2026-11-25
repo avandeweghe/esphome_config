@@ -2,6 +2,8 @@
 # on an ESP32-C3 dev board with a 0.42" 72x40 SSD1306 OLED.
 # The sensor and OLED share one I2C bus:
 #   VL53L1X VIN -> 3V3, GND -> GND, SDA -> GPIO5, SCL -> GPIO6 (XSHUT / INT unused)
+# Relay (5V 1-channel optocoupler board, jumper on H = high-level trigger):
+#   DC+ -> 5V, DC- -> GND, IN -> GPIO4; COM/NO across the opener's wall-button terminals
 # Calibrate from Home Assistant: close the door and press "Set Closed Here",
 # open it fully and press "Set Open Here".
 packages:
@@ -22,7 +24,10 @@ substitutions:
   # Project Name
   project_name: "Custom.Garage-Door-ToF"
   # Release version of this yaml file
-  project_version: "v0.1.0"
+  project_version: "v0.2.0"
+  # Relay input pin and button-press length
+  relay_pin: GPIO4
+  relay_pulse: 500ms
   # I2C pins (shared with the onboard OLED)
   i2c_sda: GPIO5
   i2c_scl: GPIO6
@@ -134,6 +139,51 @@ sensor:
       return clamp(p, 0.0f, 100.0f);
     filters:
       - delta: 1.0
+
+output:
+  # Relay across the opener's wall-button contacts (high-level trigger)
+  - platform: gpio
+    id: relay
+    pin: ${relay_pin}
+
+script:
+  # One "button press" on the opener
+  - id: pulse_relay
+    mode: single        # extra presses during a pulse are ignored
+    then:
+      - output.turn_on: relay
+      - delay: ${relay_pulse}
+      - output.turn_off: relay
+
+cover:
+  - platform: template
+    name: None
+    id: door
+    icon: mdi:garage
+    device_class: garage
+    has_position: true
+    # Position comes from the sensor (0 = closed, 1 = open)
+    lambda: |-
+      float p = id(door_pct).state;
+      if (isnan(p)) return {};
+      return p / 100.0f;
+    open_action:
+      # Only pulse when not already fully open; pulsing an open door would close it
+      - if:
+          condition:
+            lambda: 'return isnan(id(door_pct).state) || id(door_pct).state < 98.0f;'
+          then:
+            - script.execute: pulse_relay
+    close_action:
+      # Only pulse when not already closed
+      - if:
+          condition:
+            lambda: 'return isnan(id(door_pct).state) || id(door_pct).state > 2.0f;'
+          then:
+            - script.execute: pulse_relay
+    stop_action:
+      # A press while moving stops the opener
+      - script.execute: pulse_relay
 
 font:
   - file: "gfonts://Roboto@700"
