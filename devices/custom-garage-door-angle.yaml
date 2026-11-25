@@ -6,6 +6,7 @@
 # Magnet: diametrically magnetised, centred on the shaft end, about 1-3 mm from the chip.
 # Relay (5V 1-channel optocoupler board, jumper on H = high-level trigger):
 #   DC+ -> 5V, DC- -> GND, IN -> GPIO4; COM/NO across the opener's wall-button terminals
+# Reed switch (closed-position): one wire -> GPIO3, other -> GND (internal pull-up, no resistor)
 # Calibrate from Home Assistant: close the door and press "Set Closed Here",
 # open it fully and press "Set Open Here".
 packages:
@@ -26,10 +27,12 @@ substitutions:
   # Project Name
   project_name: "Custom.Garage-Door-Angle"
   # Release version of this yaml file
-  project_version: "v0.2.0"
+  project_version: "v0.3.0"
   # Relay input pin and button-press length
   relay_pin: GPIO4
   relay_pulse: 500ms
+  # Reed switch pin (contact closes when the door is closed)
+  reed_pin: GPIO3
   # I2C pins (shared with the onboard OLED)
   i2c_sda: GPIO5
   i2c_scl: GPIO6
@@ -180,6 +183,27 @@ sensor:
     filters:
       - delta: 1.0
 
+binary_sensor:
+  # Reed switch at the closed position. Contact closed pulls the pin LOW = door closed.
+  - platform: gpio
+    name: "Closed Sensor"
+    id: reedswitch
+    icon: mdi:garage
+    device_class: garage_door   # on = open, off = closed
+    pin:
+      number: ${reed_pin}
+      mode:
+        input: true
+        pullup: true
+    filters:
+      # Ignore contact bounce as the magnet passes
+      - delayed_on_off: 100ms
+    on_release:
+      # Door reached closed: re-zero the revolution count (removes drift)
+      - lambda: |-
+          id(turns) = 0;
+          if (id(last_raw) >= 0) id(zero_raw) = id(last_raw);
+
 output:
   # Relay across the opener's wall-button contacts (high-level trigger)
   - platform: gpio
@@ -204,6 +228,7 @@ cover:
     has_position: true
     # Position comes from the sensor (0 = closed, 1 = open)
     lambda: |-
+      if (!id(reedswitch).state) return 0.0f;   // reed switch: fully closed
       float p = id(door_pct).state;
       if (isnan(p)) return {};
       return p / 100.0f;
@@ -218,7 +243,7 @@ cover:
       # Only pulse when not already closed
       - if:
           condition:
-            lambda: 'return isnan(id(door_pct).state) || id(door_pct).state > 2.0f;'
+            lambda: 'return id(reedswitch).state && (isnan(id(door_pct).state) || id(door_pct).state > 2.0f);'
           then:
             - script.execute: pulse_relay
     stop_action:
