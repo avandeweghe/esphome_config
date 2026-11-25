@@ -1,0 +1,203 @@
+# Garage door position from an MT6701 magnetic angle encoder on a turning shaft
+# (opener drive shaft or pulley), on an ESP32-C3 dev board with a 0.42" 72x40
+# SSD1306 OLED. Shaft revolutions are counted and saved, relative to the closed position.
+# The encoder and OLED share one I2C bus:
+#   MT6701 VCC -> 3V3, GND -> GND, SDA -> GPIO5, SCL -> GPIO6 (board in I2C mode)
+# Magnet: diametrically magnetised, centred on the shaft end, about 1-3 mm from the chip.
+# Calibrate from Home Assistant: close the door and press "Set Closed Here",
+# open it fully and press "Set Open Here".
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+  esp32: !include ../common/esp32.yaml
+  improv: !include ../common/improv.yaml
+
+substitutions:
+  # Default name
+  name: "garage-door-angle"
+  # Default friendly name
+  friendly_name: "Garage Door Angle"
+  # Allows ESP device to be automatically linked to an 'Area' in Home Assistant
+  room: ""
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Custom garage door position sensor (MT6701 encoder + OLED, ESP32-C3)"
+  # Project Name
+  project_name: "Custom.Garage-Door-Angle"
+  # Release version of this yaml file
+  project_version: "v0.1.0"
+  # I2C pins (shared with the onboard OLED)
+  i2c_sda: GPIO5
+  i2c_scl: GPIO6
+  # Default shaft revolutions from closed to fully open; adjustable from Home Assistant
+  open_revolutions: "7.5"
+
+esphome:
+  comment: "${device_description}"
+  area: "${room}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+
+esp32:
+  board: esp32-c3-devkitm-1
+  flash_size: 4MB
+  variant: ESP32C3
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # Extend the watchdog timeout, so the device reboots if the device appears locked up for over 10 seconds.
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+
+i2c:
+  id: bus_a
+  sda: ${i2c_sda}
+  scl: ${i2c_scl}
+  frequency: 400kHz
+  scan: true
+
+mt6701_i2c:
+  id: enc
+  i2c_id: bus_a
+
+globals:
+  # Whole shaft turns since the closed reference (saved to flash)
+  - id: turns
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  # Last raw count read (0-16383), -1 until the first read
+  - id: last_raw
+    type: int
+    restore_value: no
+    initial_value: '-1'
+  # Raw count at the closed position
+  - id: zero_raw
+    type: int
+    restore_value: yes
+    initial_value: '0'
+
+number:
+  - platform: template
+    name: "Open Revolutions"
+    id: open_revs
+    icon: mdi:rotate-right
+    entity_category: config
+    min_value: -100
+    max_value: 100
+    step: 0.01
+    initial_value: ${open_revolutions}
+    restore_value: true
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Set Closed Here"
+    id: set_closed
+    icon: mdi:garage
+    entity_category: config
+    on_press:
+      - lambda: |-
+          id(turns) = 0;
+          id(zero_raw) = id(last_raw) < 0 ? 0 : id(last_raw);
+
+  - platform: template
+    name: "Set Open Here"
+    id: set_open
+    icon: mdi:garage-open
+    entity_category: config
+    on_press:
+      - number.set:
+          id: open_revs
+          value: !lambda "return id(door_revs).state;"
+
+sensor:
+  # Fast internal poll so no wrap-around is missed (shaft under ~25 rev/s)
+  - platform: mt6701
+    mt6701_id: enc
+    id: shaft_angle
+    internal: true
+    update_interval: 20ms
+    raw_count:
+      id: shaft_raw
+      internal: true
+      on_value:
+        then:
+          - lambda: |-
+              int raw = (int) x;
+              int last = id(last_raw);
+              if (last >= 0) {
+                int d = raw - last;
+                if (d < -8192) id(turns)++;
+                else if (d > 8192) id(turns)--;
+              }
+              id(last_raw) = raw;
+
+  - platform: template
+    name: "Revolutions"
+    id: door_revs
+    icon: mdi:rotate-right
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 500ms
+    lambda: |-
+      if (id(last_raw) < 0) return {};
+      return id(turns) + (id(last_raw) - id(zero_raw)) / 16384.0f;
+    filters:
+      - delta: 0.02
+
+  - platform: template
+    name: "Open"
+    id: door_pct
+    icon: mdi:garage-open-variant
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      float r = id(door_revs).state;
+      float o = id(open_revs).state;
+      if (isnan(r) || fabsf(o) < 0.05f) return {};   // not calibrated
+      return clamp(r / o * 100.0f, 0.0f, 100.0f);
+    filters:
+      - delta: 1.0
+
+  - platform: template
+    name: "Shaft Angle"
+    id: shaft_angle_pub
+    icon: mdi:angle-acute
+    unit_of_measurement: "°"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 2s
+    lambda: |-
+      return id(shaft_angle).state;
+    filters:
+      - delta: 1.0
+
+font:
+  - file: "gfonts://Roboto@700"
+    id: f_big
+    size: 18
+  - file: "gfonts://Roboto"
+    id: f_small
+    size: 10
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 72x40"
+    id: oled
+    i2c_id: bus_a
+    address: 0x3C
+    update_interval: 500ms
+    lambda: |-
+      if (isnan(id(door_pct).state)) {
+        it.print(36, 12, id(f_small), TextAlign::CENTER, "no reading");
+      } else {
+        it.printf(36, 12, id(f_big), TextAlign::CENTER, "%.0f%%", id(door_pct).state);
+      }
+      if (!isnan(id(door_revs).state))
+        it.printf(36, 32, id(f_small), TextAlign::CENTER, "%.2f rev", id(door_revs).state);
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/custom-garage-door-angle.yaml@main

@@ -1,0 +1,163 @@
+# Garage door position from a VL53L1X time-of-flight sensor (TOF400C module)
+# on an ESP32-C3 dev board with a 0.42" 72x40 SSD1306 OLED.
+# The sensor and OLED share one I2C bus:
+#   VL53L1X VIN -> 3V3, GND -> GND, SDA -> GPIO5, SCL -> GPIO6 (XSHUT / INT unused)
+# Calibrate from Home Assistant: close the door and press "Set Closed Here",
+# open it fully and press "Set Open Here".
+packages:
+  base: !include ../common/base.yaml
+  wifi: !include ../common/wifi.yaml
+  esp32: !include ../common/esp32.yaml
+  improv: !include ../common/improv.yaml
+
+substitutions:
+  # Default name
+  name: "garage-door-tof"
+  # Default friendly name
+  friendly_name: "Garage Door ToF"
+  # Allows ESP device to be automatically linked to an 'Area' in Home Assistant
+  room: ""
+  # Description as appears in ESPHome & top of webserver page
+  device_description: "Custom garage door position sensor (VL53L1X ToF + OLED, ESP32-C3)"
+  # Project Name
+  project_name: "Custom.Garage-Door-ToF"
+  # Release version of this yaml file
+  project_version: "v0.1.0"
+  # I2C pins (shared with the onboard OLED)
+  i2c_sda: GPIO5
+  i2c_scl: GPIO6
+  # Default calibration distances (m); adjustable from Home Assistant
+  closed_distance: "2.40"
+  open_distance: "0.35"
+
+esphome:
+  comment: "${device_description}"
+  area: "${room}"
+  project:
+    name: "${project_name}"
+    version: "${project_version}"
+
+esp32:
+  board: esp32-c3-devkitm-1
+  flash_size: 4MB
+  variant: ESP32C3
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # Extend the watchdog timeout, so the device reboots if the device appears locked up for over 10 seconds.
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+
+i2c:
+  id: bus_a
+  sda: ${i2c_sda}
+  scl: ${i2c_scl}
+  frequency: 400kHz
+  scan: true
+
+number:
+  # Calibration distances (m), saved on the device
+  - platform: template
+    name: "Closed Distance"
+    id: closed_dist
+    icon: mdi:arrow-collapse-vertical
+    entity_category: config
+    unit_of_measurement: m
+    min_value: 0.05
+    max_value: 4.0
+    step: 0.01
+    initial_value: ${closed_distance}
+    restore_value: true
+    optimistic: true
+
+  - platform: template
+    name: "Open Distance"
+    id: open_dist
+    icon: mdi:arrow-expand-vertical
+    entity_category: config
+    unit_of_measurement: m
+    min_value: 0.05
+    max_value: 4.0
+    step: 0.01
+    initial_value: ${open_distance}
+    restore_value: true
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Set Closed Here"
+    id: set_closed
+    icon: mdi:garage
+    entity_category: config
+    on_press:
+      - number.set:
+          id: closed_dist
+          value: !lambda "return id(door_dist).state;"
+
+  - platform: template
+    name: "Set Open Here"
+    id: set_open
+    icon: mdi:garage-open
+    entity_category: config
+    on_press:
+      - number.set:
+          id: open_dist
+          value: !lambda "return id(door_dist).state;"
+
+sensor:
+  - platform: vl53l1x
+    name: "Distance"
+    id: door_dist
+    i2c_id: bus_a
+    icon: mdi:ruler
+    update_interval: 250ms
+    filters:
+      # Drop single-sample spikes, publish every 0.5 s
+      - median:
+          window_size: 5
+          send_every: 2
+
+  - platform: template
+    name: "Open"
+    id: door_pct
+    icon: mdi:garage-open-variant
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      float d = id(door_dist).state;
+      if (isnan(d)) return {};
+      float c = id(closed_dist).state, o = id(open_dist).state;
+      if (fabsf(c - o) < 0.05f) return {};   // not calibrated
+      float p = (c - d) / (c - o) * 100.0f;
+      return clamp(p, 0.0f, 100.0f);
+    filters:
+      - delta: 1.0
+
+font:
+  - file: "gfonts://Roboto@700"
+    id: f_big
+    size: 18
+  - file: "gfonts://Roboto"
+    id: f_small
+    size: 10
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 72x40"
+    id: oled
+    i2c_id: bus_a
+    address: 0x3C
+    update_interval: 500ms
+    lambda: |-
+      if (isnan(id(door_pct).state)) {
+        it.print(36, 12, id(f_small), TextAlign::CENTER, "no reading");
+      } else {
+        it.printf(36, 12, id(f_big), TextAlign::CENTER, "%.0f%%", id(door_pct).state);
+      }
+      if (!isnan(id(door_dist).state))
+        it.printf(36, 32, id(f_small), TextAlign::CENTER, "%.2f m", id(door_dist).state);
+
+dashboard_import:
+  package_import_url: github://avandeweghe/esphome_config/devices/custom-garage-door-tof.yaml@main
