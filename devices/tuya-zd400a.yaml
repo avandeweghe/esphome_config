@@ -317,13 +317,20 @@ script:
                    // The datasheet table says 0 = high, but on this chip 0 = active LOW
                    // (measured: P6 stayed low with the motion flag latched).
                    && wr(0x20, 0x81);
-            ESP_LOGI("accel", "chip 0x%02X, setup %s, threshold %u (%.0f mg)",
-                     chip, ok ? "ok" : "FAILED", ths, ths * 3.91f);
-            char s[48];
-            snprintf(s, sizeof(s), "chip 0x%02X, setup %s", chip < 0 ? 0 : chip, ok ? "ok" : "FAILED");
+            // P26 ("tamper" in the stock firmware) goes to the accelerometer:
+            // check whether it follows the INT2 level bit (0x20 bit 2).
+            int p26_lvl0 = digitalRead(PIN_P26);
+            wr(0x20, 0x05);  // INT1 + INT2 active high
+            delayMicroseconds(50);
+            int p26_lvl1 = digitalRead(PIN_P26);
+            ESP_LOGI("accel", "chip 0x%02X, setup %s, threshold %u (%.0f mg), P26 INT2_LVL 0->%d 1->%d",
+                     chip, ok ? "ok" : "FAILED", ths, ths * 3.91f, p26_lvl0, p26_lvl1);
+            char s[64];
+            snprintf(s, sizeof(s), "chip 0x%02X, setup %s, P26 lvl0=%d lvl1=%d", chip < 0 ? 0 : chip,
+                     ok ? "ok" : "FAILED", p26_lvl0, p26_lvl1);
             id(accel_setup).publish_state(s);
           } else if (op == 1) {
-            wr(0x20, 0x81);  // clear the latched interrupt (P6 goes low again), keep active high
+            wr(0x20, 0x85);  // clear the latched interrupt (P6 goes low again), keep INT1/INT2 active high
           } else if (op == 2) {
             ESP_LOGI("accel", "threshold %u (%.0f mg)", ths, ths * 3.91f);
             wr(0x28, ths);
