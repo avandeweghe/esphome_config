@@ -1,26 +1,18 @@
-# Tuya ZD400A Wi-Fi vibration sensor (T1-U-HL module, BK7238, 2 x AAA),
-# Bluetooth (BTHome) version. Same scheme as devices/tuya-xt-v2-bthome.yaml.
+# Tuya ZD400A Wi-Fi vibration sensor (T1-U-HL module, BK7238, 2 x AAA).
+# Wi-Fi only, always awake (no deep sleep, no Bluetooth): everything is
+# reported to Home Assistant over the ESPHome API. Simple to set up and
+# calibrate, but AAA batteries won't last long like this; use a 3 V supply
+# or add deep sleep later.
 #
-# Normal wake (vibration, tamper change, button or 24 h heartbeat):
-#   boot -> BLE stack -> BTHome broadcast (LED blinks) -> deep sleep.
-#   A vibration wake sends "vibration on" for 1.5 s, then "vibration off" for
-#   1.5 s, so Home Assistant sees a pulse. Wi-Fi stays OFF; there is no API.
-#   Home Assistant gets the readings through the Bluetooth proxies (BTHome).
-# Update mode: hold the button 5 s while it's awake (press it to wake, keep
-#   holding). It reboots into a Wi-Fi-only boot (no Bluetooth), LED solid, OTA
-#   for 5 min or until the button is pressed, then sleep. The first boot after
-#   a new install is also an update-mode boot.
-#
-# BTHome data: vibration, tamper, battery %, button press, and "count" = ms
-# from boot to first broadcast.
+# Vibration: the accelerometer latches its motion interrupt on P6; each time
+# it fires, "Vibration" turns on, the latch is cleared, and "Vibration" turns
+# off again after ${vibration_off_delay} without more motion.
 #
 # Pins (stock Tuya firmware config + I2C pin scan):
 #   P24 SDA / P9 SCL  MiraMEMS DA217 ("mir3da") accelerometer, I2C 0x26, id 0x13
 #   P6   accelerometer INT1 (motion, active high, latched until cleared)
 #   P16  button (active LOW)          P21  status LED (active HIGH)
 #   P26  tamper (active high)         P20  battery ADC (ADC3), P23 divider enable
-#
-# Each device file sets name, friendly_name and ble_name (the BTHome local name).
 packages:
   base: !include ../common/base.yaml
   wifi: !include ../common/wifi.yaml
@@ -30,21 +22,20 @@ substitutions:
   name: "vibration-sensor"
   # Default friendly name
   friendly_name: "Vibration Sensor"
-  # BTHome local name broadcast over Bluetooth (max 6 characters)
-  ble_name: "Vibe"
   # Description as appears in ESPHome & top of webserver page
-  device_description: "Tuya ZD400A vibration sensor (T1-U-HL, BK7238, BTHome)"
+  device_description: "Tuya ZD400A vibration sensor (T1-U-HL, BK7238)"
   # Project Name
   project_name: "Tuya.ZD400A"
   # Release version of this yaml file
-  project_version: "v1.0.0"
+  project_version: "v2.0.0"
   # Default motion threshold in 3.91 mg steps (±2 g range); 20 = 78 mg.
-  # Can be changed in update mode with the "Vibration Threshold" number.
+  # Can be changed with the "Vibration Threshold" number.
   vibration_threshold: "20"
-  # Battery ADC scale (calibrated 2026-11-26: read 7.21 V at x2.0 with a meter
-  # at 3.00 V, so 2.0 * 3.00 / 7.21) and 2 x AAA empty/full voltages
-  # (empty/full from the stock Tuya firmware: min_V 2704, max_V 3106)
-  battery_divider: "0.832"
+  # How long "Vibration" stays on after the last motion
+  vibration_off_delay: "5s"
+  # Battery: ADC scale (not calibrated yet; see "Battery ADC Raw") and the
+  # 2 x AAA empty/full voltages from the stock Tuya firmware (min_V/max_V).
+  battery_divider: "2.0"
   battery_empty: "2.704"
   battery_full: "3.106"
 
@@ -53,110 +44,26 @@ esphome:
   project:
     name: "${project_name}"
     version: "${project_version}"
-  platformio_options:
-    # Turn Beken's Bluetooth stack back on (ESPHome sets this option to 0
-    # itself, so ours must be a list to merge).
-    custom_options.sys_config#h:
-      - "CFG_SUPPORT_BLE = 1"
   on_boot:
     - priority: 200
       then:
-        # Read the accelerometer's latched interrupt (did vibration wake us?),
-        # (re)apply its settings and clear the latch.
+        # Apply the accelerometer settings and clear any latched interrupt.
         - script.execute:
             id: accel
             op: 0
-        # Wi-Fi starts normally at boot (OTA needs the network stack: with Wi-Fi
-        # off from boot, OTA's setup crashes the chip).
-        # First boot after an install: stay in update mode (Wi-Fi on).
-        - if:
-            condition:
-              lambda: |-
-                // Build stamp differs from the one saved in flash = new firmware.
-                uint32_t build = fnv1_hash(__DATE__ " " __TIME__);
-                if (build == id(last_build)) return false;
-                id(last_build) = build;
-                return true;
-            then:
-              - globals.set: { id: in_update, value: "true" }
-        # Update mode requested by a 5 s button hold (set, then rebooted).
-        - if:
-            condition:
-              lambda: 'return id(update_req);'
-            then:
-              - globals.set: { id: update_req, value: "false" }
-              - globals.set: { id: in_update, value: "true" }
-        # Update mode is a clean Wi-Fi-only boot: Bluetooth never starts.
-        - if:
-            condition:
-              lambda: 'return id(in_update);'
-            then:
-              - script.execute: update_mode
-            else:
-              - wifi.disable:
-    - priority: -100
-      then:
-        # Read the battery once per wake-up.
-        - output.turn_on: bat_enable
-        - delay: 100ms
-        - component.update: battery_voltage
-        - output.turn_off: bat_enable
-        # Normal wake: start Bluetooth (from the main loop, not during setup).
-        - if:
-            condition:
-              lambda: 'return !id(in_update);'
-            then:
-              - delay: 1ms
-              - bthome_beken.start: ble
 
 bk72xx:
   board: t1-u
   framework:
     uart_port: 1
 
-api:
-  # The API only runs in update mode (Wi-Fi is off otherwise), so never reboot
-  # for having no Home Assistant connection.
-  reboot_timeout: 0s
-
-# Overrides of common/base.yaml for a battery sensor.
-preferences:
-  flash_write_interval: 1min
-
 # Logs on UART1 (TX1 = P11, pad 15), where a USB serial adapter can attach.
 logger:
   hardware_uart: UART1
   baud_rate: 115200
 
-wifi:
-  fast_connect: true
-  # Starts at boot (see on_boot), switched off straight away unless in update
-  # mode. Never reboot for being offline.
-  reboot_timeout: 0s
-
-external_components:
-  - source:
-      type: git
-      url: https://github.com/avandeweghe/esphome-bthome-beken
-      # Branch with the tamper/vibration objects (merge into main later).
-      ref: vibration-tamper
-    refresh: 0s
-    components: [bthome_beken]
-
-button:
-  - platform: template
-    name: "Sleep Now"
-    icon: mdi:sleep
-    on_press:
-      - logger.log: "Sleep now pressed in Home Assistant"
-      - script.stop: update_mode
-      - script.execute:
-          id: sleep_now
-          minutes: 1440
-
 number:
-  # Motion threshold (3.91 mg steps). Change it in update mode; it is saved
-  # and applied to the accelerometer at every wake.
+  # Motion threshold (3.91 mg steps); saved and re-applied at boot.
   - platform: template
     name: "Vibration Threshold"
     id: vib_threshold
@@ -177,12 +84,16 @@ output:
   - platform: gpio
     id: bat_enable
     pin: P23
-  - platform: gpio
-    id: led
+
+light:
+  # Status LED: blinks while Wi-Fi / Home Assistant aren't connected.
+  - platform: status_led
+    name: "Status LED"
+    id: status_led_light
+    disabled_by_default: true
     pin: P21
 
 binary_sensor:
-  # Reported vibration state (on for a vibration wake / motion while awake).
   - platform: template
     id: vibration
     name: "Vibration"
@@ -196,21 +107,8 @@ binary_sensor:
       mode:
         input: true
         pulldown: true
-      allow_other_uses: true
     on_press:
-      - logger.log: "Motion while awake"
-      - binary_sensor.template.publish:
-          id: vibration
-          state: ON
-      - script.execute:
-          id: accel
-          op: 1
-      # Give the new "on" its full window before the "off" + sleep.
-      - if:
-          condition:
-            script.is_running: report_then_sleep
-          then:
-            - script.execute: report_then_sleep
+      - script.execute: vibration_pulse
   - platform: gpio
     id: tamper
     name: "Tamper"
@@ -220,10 +118,9 @@ binary_sensor:
       mode:
         input: true
         pulldown: true
-      allow_other_uses: true
   - platform: gpio
     id: side_button
-    internal: true
+    name: "Button"
     pin:
       number: P16
       mode:
@@ -231,10 +128,8 @@ binary_sensor:
         pullup: true
       # Active low: the pin idles high and the button pulls it to ground.
       inverted: true
-      allow_other_uses: true
-    on_press:
-      - bthome_beken.button_event:
-          type: press
+    filters:
+      - delayed_on_off: 20ms
 
 sensor:
   - platform: adc
@@ -242,15 +137,13 @@ sensor:
     name: "Battery Voltage"
     entity_category: diagnostic
     pin: ADC3
-    # Average 16 readings per wake.
+    # Average 16 readings per sample.
     samples: 16
+    # Read by the interval below (the divider has to be switched on first).
     update_interval: never
     filters:
       - multiply: ${battery_divider}
     on_value:
-      - logger.log:
-          format: "Battery %.3f V"
-          args: [x]
       - component.update: battery_level
   - platform: template
     id: battery_level
@@ -262,8 +155,8 @@ sensor:
       float v = id(battery_voltage).state;
       if (isnan(v)) return {};
       return clamp((v - ${battery_empty}f) / (${battery_full}f - ${battery_empty}f) * 100.0f, 0.0f, 100.0f);
-  # Calibration aids (update mode only): raw ADC voltage at P20, unscaled,
-  # with the battery divider switched on (P23 high) and off.
+  # Calibration aids: unscaled ADC voltage at P20 with the divider (P23)
+  # switched on and off.
   - platform: template
     id: bat_adc_on
     name: "Battery ADC Raw"
@@ -279,76 +172,45 @@ sensor:
     entity_category: diagnostic
     update_interval: never
 
-bthome_beken:
-  id: ble
-  auto_start: false
-  local_name: "${ble_name}"
-  vibration: vibration
-  tamper: tamper
-  battery: battery_level
-  adv_interval: 50ms
-  on_packet:
-    # Short blink for every packet sent (not in update mode, where it's solid).
-    - if:
-        condition:
-          not:
-            script.is_running: update_mode
-        then:
-          - output.turn_on: led
-          - delay: 60ms
-          - output.turn_off: led
-  on_broadcast:
-    - script.execute: report_then_sleep
-
 interval:
-  # Update mode: keep the LED solid (a packet blink can otherwise switch it off).
-  - interval: 500ms
+  # Battery reading every 10 s: switch the divider on, sample, switch it off.
+  - interval: 10s
     then:
-      - if:
-          condition:
-            script.is_running: update_mode
-          then:
-            - output.turn_on: led
-  # Update mode: re-read the battery every 2 s (for calibration on a bench
-  # supply). Normal wakes only read it once, at boot.
-  - interval: 2s
-    then:
-      - if:
-          condition:
-            script.is_running: update_mode
-          then:
-            - output.turn_on: bat_enable
-            - delay: 50ms
-            - lambda: |-
-                float v = id(battery_voltage).sample();
-                id(bat_adc_on).publish_state(v);
-                id(battery_voltage).publish_state(v);  // goes through the multiply filter
-            - output.turn_off: bat_enable
-            - delay: 50ms
-            - lambda: |-
-                float v = id(battery_voltage).sample();
-                id(bat_adc_off).publish_state(v);
-                ESP_LOGI("battery", "ADC raw: divider on %.3f V, off %.3f V", id(bat_adc_on).state, v);
-
-globals:
-  - id: update_req
-    type: bool
-    restore_value: true
-    initial_value: 'false'
-  - id: in_update
-    type: bool
-    restore_value: false
-    initial_value: 'false'
-  - id: last_build
-    type: uint32_t
-    restore_value: true
-    initial_value: '0'
+      - output.turn_on: bat_enable
+      - delay: 50ms
+      - lambda: |-
+          float v = id(battery_voltage).sample();
+          id(bat_adc_on).publish_state(v);
+          id(battery_voltage).publish_state(v);  // goes through the multiply filter
+      - output.turn_off: bat_enable
+      - delay: 50ms
+      - lambda: |-
+          float v = id(battery_voltage).sample();
+          id(bat_adc_off).publish_state(v);
+          ESP_LOGI("battery", "ADC raw: divider on %.3f V, off %.3f V -> %.3f V",
+                   id(bat_adc_on).state, v, id(battery_voltage).state);
 
 script:
+  # Motion: report it, clear the accelerometer latch (so the next motion
+  # fires again), and turn "Vibration" off after a quiet period.
+  - id: vibration_pulse
+    mode: restart
+    then:
+      - binary_sensor.template.publish:
+          id: vibration
+          state: ON
+      - script.execute:
+          id: accel
+          op: 1
+      - delay: ${vibration_off_delay}
+      - binary_sensor.template.publish:
+          id: vibration
+          state: OFF
+
   # DA217 accelerometer over bit-banged I2C (SDA P24, SCL P9, address 0x26).
   # Register values from the MiraMEMS DA217 datasheet (Rev 0.2).
-  # op 0: boot - note whether its latched motion interrupt woke us, apply the
-  #       settings, clear the latch.  op 1: clear the latch.  op 2: threshold.
+  # op 0: boot - apply the settings and clear the latch.
+  # op 1: clear the latch.  op 2: apply the threshold.
   - id: accel
     mode: queued
     parameters:
@@ -408,8 +270,6 @@ script:
           uint8_t ths = isnan(t) ? ${vibration_threshold} : (uint8_t) clamp(t, 1.0f, 255.0f);
 
           if (op == 0) {
-            bool pin_high = digitalRead(PIN_P6) == HIGH;
-            int flag = rd(0x09);   // MOTION_FLAG, bit 2 = active (motion) interrupt
             int chip = rd(0x01);   // chip id, 0x13
             bool ok = wr(0x0F, 0x00)   // ±2 g, 14 bit
                    && wr(0x10, 0x05)   // 31.25 Hz, X/Y/Z on
@@ -420,122 +280,14 @@ script:
                    && wr(0x19, 0x04)   // motion interrupt -> INT1
                    && wr(0x16, 0x07)   // motion interrupt on X/Y/Z
                    && wr(0x20, 0x80);  // INT1 push-pull active high + clear the latch
-            bool vib = pin_high || (flag >= 0 && (flag & 0x04));
-            ESP_LOGI("accel", "chip 0x%02X, setup %s, wake pin %d, flag 0x%02X -> vibration %s, threshold %u",
-                     chip, ok ? "ok" : "FAILED", pin_high, flag, vib ? "YES" : "no", ths);
-            id(vibration).publish_state(vib);
+            ESP_LOGI("accel", "chip 0x%02X, setup %s, threshold %u (%.0f mg)",
+                     chip, ok ? "ok" : "FAILED", ths, ths * 3.91f);
           } else if (op == 1) {
             wr(0x20, 0x80);  // clear the latched interrupt (P6 goes low again)
           } else if (op == 2) {
             ESP_LOGI("accel", "threshold %u (%.0f mg)", ths, ths * 3.91f);
             wr(0x28, ths);
           }
-
-  - id: report_then_sleep
-    mode: restart
-    then:
-      - delay: 1500ms
-      # Held button: if it's still down 5 s later, go to update mode instead.
-      - if:
-          condition:
-            binary_sensor.is_on: side_button
-          then:
-            - wait_until:
-                condition:
-                  binary_sensor.is_off: side_button
-                timeout: 5s
-            - if:
-                condition:
-                  binary_sensor.is_on: side_button
-                then:
-                  # Reboot into a Wi-Fi-only update boot.
-                  - logger.log: "Button held: rebooting into update mode"
-                  - lambda: |-
-                      id(update_req) = true;
-                      global_preferences->sync();
-                      App.safe_reboot();
-      # Vibration pulse: send "off" and give it its own window before sleeping.
-      - if:
-          condition:
-            binary_sensor.is_on: vibration
-          then:
-            - binary_sensor.template.publish:
-                id: vibration
-                state: OFF
-            - delay: 1500ms
-      - if:
-          condition:
-            script.is_running: update_mode
-          then:
-            - logger.log: "Update mode, staying awake"
-          else:
-            # Next wake: vibration, tamper change, button, or the daily heartbeat.
-            - script.execute:
-                id: sleep_now
-                minutes: 1440
-
-  - id: update_mode
-    mode: single
-    then:
-      - logger.log: "Update mode: Wi-Fi on for 5 min (press the button to end it)"
-      - output.turn_on: led
-      - wifi.enable:
-      # Let go of the hold that started it, then one press ends it early.
-      - wait_until:
-          condition:
-            binary_sensor.is_off: side_button
-          timeout: 8s
-      - wait_until:
-          condition:
-            binary_sensor.is_on: side_button
-          timeout: 5min
-      - logger.log: "Update mode over"
-      - script.execute:
-          id: sleep_now
-          minutes: 1440
-
-  - id: sleep_now
-    mode: single
-    parameters:
-      minutes: int
-    then:
-      - output.turn_off: led
-      # Clear the motion latch so the next motion raises P6 and wakes us.
-      - script.execute:
-          id: accel
-          op: 1
-      - deep_sleep.enter:
-          id: sleep_ctl
-          sleep_duration: !lambda 'return (uint32_t) minutes * 60000;'
-
-deep_sleep:
-  id: sleep_ctl
-  sleep_duration: 24h
-  wakeup_pin:
-    # Accelerometer INT1: wakes when motion latches it high.
-    - pin:
-        number: P6
-        mode:
-          input: true
-          pulldown: true
-        allow_other_uses: true
-    # Tamper: wake on any change (INVERT_WAKEUP flips the wake level to the
-    # opposite of the pin's state at sleep time).
-    - pin:
-        number: P26
-        mode:
-          input: true
-          pulldown: true
-        allow_other_uses: true
-      wakeup_pin_mode: INVERT_WAKEUP
-    # Button: wakes when pressed (pulls the pin low).
-    - pin:
-        number: P16
-        mode:
-          input: true
-          pullup: true
-        inverted: true
-        allow_other_uses: true
 
 dashboard_import:
   package_import_url: github://avandeweghe/esphome_config/devices/tuya-zd400a.yaml@main
