@@ -33,9 +33,8 @@ substitutions:
   vibration_threshold: "20"
   # How long "Vibration" stays on after the last motion
   vibration_off_delay: "5s"
-  # Battery: ADC scale (not calibrated yet; see "Battery ADC Raw") and the
-  # 2 x AAA empty/full voltages from the stock Tuya firmware (min_V/max_V).
-  battery_divider: "2.0"
+  # Battery: 2 x AAA empty/full voltages from the stock Tuya firmware
+  # (min_V/max_V). The ADC calibration is in the battery_voltage filter.
   battery_empty: "2.704"
   battery_full: "3.106"
 
@@ -142,7 +141,15 @@ sensor:
     # Read by the interval below (the divider has to be switched on first).
     update_interval: never
     filters:
-      - multiply: ${battery_divider}
+      # Raw ADC voltage (divider on) -> battery voltage, from a bench supply
+      # checked with a meter (2026-11-26). The BK7238 ADC reads high with an
+      # offset, so this is a straight-line fit, not a plain multiplier.
+      - calibrate_linear:
+          method: least_squares
+          datapoints:
+            - 3.529 -> 3.0
+            - 3.361 -> 2.7
+            - 3.249 -> 2.5
     on_value:
       - component.update: battery_level
   - platform: template
