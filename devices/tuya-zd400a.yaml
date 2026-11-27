@@ -42,9 +42,10 @@ substitutions:
   # Can be changed in update mode with the "Vibration Threshold" number.
   vibration_threshold: "20"
   # Battery divider ratio (not calibrated yet) and 2 x AAA empty/full voltages
+  # (empty/full from the stock Tuya firmware: min_V 2704, max_V 3106)
   battery_divider: "2.0"
-  battery_empty: "2.2"
-  battery_full: "3.0"
+  battery_empty: "2.704"
+  battery_full: "3.106"
 
 esphome:
   comment: "${device_description}"
