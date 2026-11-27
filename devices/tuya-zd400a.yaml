@@ -223,6 +223,12 @@ binary_sensor:
             script.is_running: report_then_sleep
           then:
             - script.execute: report_then_sleep
+      # Update mode (Wi-Fi, no report_then_sleep): turn it off after a quiet period.
+      - if:
+          condition:
+            script.is_running: update_mode
+          then:
+            - script.execute: vibration_quiet
   - platform: gpio
     id: side_button
     internal: true
@@ -433,6 +439,25 @@ script:
             ESP_LOGI("accel", "threshold %u (%.0f mg)", ths, ths * 3.91f);
             wr(0x28, ths);
           }
+
+  # Update mode: "Vibration" off after 5 s without motion. If the chip has
+  # latched motion again (P6 still high, so no new edge), clear it and wait again.
+  - id: vibration_quiet
+    mode: restart
+    then:
+      - delay: 5s
+      - if:
+          condition:
+            binary_sensor.is_on: accel_int
+          then:
+            - script.execute:
+                id: accel
+                op: 1
+            - script.execute: vibration_quiet
+          else:
+            - binary_sensor.template.publish:
+                id: vibration
+                state: OFF
 
   - id: report_then_sleep
     mode: restart
