@@ -282,6 +282,8 @@ bthome_beken:
   id: ble
   auto_start: false
   local_name: "${ble_name}"
+  # The BK7238 BLE stack adds the AD flags itself and rejects data with them.
+  adv_flags: false
   vibration: vibration
   battery: battery_level
   adv_interval: 50ms
