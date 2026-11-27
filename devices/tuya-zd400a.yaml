@@ -231,6 +231,13 @@ script:
           id: accel
           op: 1
       - delay: ${vibration_off_delay}
+      # Still latched (motion continued during the window): start again.
+      - if:
+          condition:
+            binary_sensor.is_on: accel_int
+          then:
+            - script.execute: vibration_pulse
+            - script.stop: vibration_pulse
       - binary_sensor.template.publish:
           id: vibration
           state: OFF
