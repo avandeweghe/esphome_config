@@ -527,6 +527,12 @@ script:
           else if (v == -2) snprintf(s, sizeof(s), "FAILED: BLE stack never started");
           else snprintf(s, sizeof(s), "no Bluetooth wake yet");
           id(last_ble_wake).publish_state(s);
+      # A vibration wake sets "Vibration" on at boot; let it time out here too.
+      - if:
+          condition:
+            binary_sensor.is_on: vibration
+          then:
+            - script.execute: vibration_quiet
       - logger.log: "Update mode: Wi-Fi on for 5 min (press the button to end it)"
       - output.turn_on: led
       - wifi.enable:
