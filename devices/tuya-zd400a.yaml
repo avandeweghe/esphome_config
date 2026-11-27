@@ -335,15 +335,6 @@ script:
             };
             float x = axis(r[0x02], r[0x03]), y = axis(r[0x04], r[0x05]), z = axis(r[0x06], r[0x07]);
             int p6 = digitalRead(PIN_P6);
-            // INT1 polarity test: read P6 with INT1_LVL = 0 (current) and = 1.
-            // If P6 follows the bit, P6 is wired to INT1 and we learn which
-            // level means "motion" (the latched flag is known from 0x09).
-            int r20 = r[0x20] & 0x7F;
-            wr(0x20, r20 ^ 0x01);
-            delayMicroseconds(50);
-            int p6_flip = digitalRead(PIN_P6);
-            wr(0x20, r20);
-            ESP_LOGD("accel", "P6 with INT1_LVL=%d: %d, flipped: %d", r20 & 1, p6, p6_flip);
             int p26_pd = digitalRead(PIN_P26);
             pinMode(PIN_P26, INPUT_PULLUP);
             delayMicroseconds(50);
@@ -352,10 +343,10 @@ script:
             char s[255];
             snprintf(s, sizeof(s),
                      "id=%02X x=%.2f y=%.2f z=%.2f flag=%02X act=%02X | 0F=%02X 10=%02X 11=%02X "
-                     "16=%02X 19=%02X 20=%02X 21=%02X 27=%02X 28=%02X | P6=%d flip=%d P26 pd=%d pu=%d",
+                     "16=%02X 19=%02X 20=%02X 21=%02X 27=%02X 28=%02X | P6=%d P26 pd=%d pu=%d",
                      r[0x01] & 0xFF, x, y, z, r[0x09] & 0xFF, r[0x0B] & 0xFF, r[0x0F] & 0xFF, r[0x10] & 0xFF,
                      r[0x11] & 0xFF, r[0x16] & 0xFF, r[0x19] & 0xFF, r[0x20] & 0xFF, r[0x21] & 0xFF,
-                     r[0x27] & 0xFF, r[0x28] & 0xFF, p6, p6_flip, p26_pd, p26_pu);
+                     r[0x27] & 0xFF, r[0x28] & 0xFF, p6, p26_pd, p26_pu);
             ESP_LOGD("accel", "%s", s);
             id(accel_debug).publish_state(s);
           }
