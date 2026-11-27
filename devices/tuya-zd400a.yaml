@@ -43,9 +43,9 @@ substitutions:
   # Default motion threshold in 3.91 mg steps (±2 g range); 20 = 78 mg.
   # Can be changed in update mode with the "Vibration Threshold" number.
   vibration_threshold: "20"
-  # Battery: 2 x AAA empty/full voltages from the stock Tuya firmware
-  # (min_V 2704, max_V 3106). The ADC calibration is in the battery_voltage filter.
-  battery_empty: "2.704"
+  # Battery: 2 x AAA empty (2.4 V) / full (stock Tuya max_V) voltages.
+  # The ADC calibration is in the battery_voltage filter.
+  battery_empty: "2.4"
   battery_full: "3.106"
 
 esphome:

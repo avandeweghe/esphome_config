@@ -211,11 +211,11 @@ sensor:
     id: battery_level
     internal: true
     update_interval: never
-    # 2 x AAA: 2.704 V empty, 3.106 V full (stock Tuya firmware range)
+    # 2 x AAA: 2.4 V empty, 3.106 V full (full from the stock Tuya firmware)
     lambda: |-
       float v = id(battery_voltage).state;
       if (isnan(v)) return {};
-      return clamp((v - 2.704f) / (3.106f - 2.704f) * 100.0f, 0.0f, 100.0f);
+      return clamp((v - 2.4f) / (3.106f - 2.4f) * 100.0f, 0.0f, 100.0f);
 
 bthome_beken:
   id: ble
