@@ -211,11 +211,17 @@ sensor:
     id: battery_level
     internal: true
     update_interval: never
-    # 2 x AAA: 2.4 V empty, 3.106 V full (full from the stock Tuya firmware)
     lambda: |-
       float v = id(battery_voltage).state;
       if (isnan(v)) return {};
-      return clamp((v - 2.4f) / (3.106f - 2.4f) * 100.0f, 0.0f, 100.0f);
+      // 2 x AAA alkaline discharge curve (light-load reading at boot).
+      static const float V[] = {2.2f, 2.4f, 2.6f, 2.8f, 3.0f};
+      static const float P[] = {0.0f, 20.0f, 45.0f, 75.0f, 100.0f};
+      if (v <= V[0]) return 0.0f;
+      if (v >= V[4]) return 100.0f;
+      int i = 0;
+      while (v > V[i + 1]) i++;
+      return P[i] + (v - V[i]) / (V[i + 1] - V[i]) * (P[i + 1] - P[i]);
 
 bthome_beken:
   id: ble

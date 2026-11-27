@@ -43,10 +43,6 @@ substitutions:
   # Default motion threshold in 3.91 mg steps (±2 g range); 20 = 78 mg.
   # Can be changed in update mode with the "Vibration Threshold" number.
   vibration_threshold: "20"
-  # Battery: 2 x AAA empty (2.4 V) / full (stock Tuya max_V) voltages.
-  # The ADC calibration is in the battery_voltage filter.
-  battery_empty: "2.4"
-  battery_full: "3.106"
 
 esphome:
   comment: "${device_description}"
@@ -275,7 +271,14 @@ sensor:
     lambda: |-
       float v = id(battery_voltage).state;
       if (isnan(v)) return {};
-      return clamp((v - ${battery_empty}f) / (${battery_full}f - ${battery_empty}f) * 100.0f, 0.0f, 100.0f);
+      // 2 x AAA alkaline discharge curve (light-load reading at boot).
+      static const float V[] = {2.2f, 2.4f, 2.6f, 2.8f, 3.0f};
+      static const float P[] = {0.0f, 20.0f, 45.0f, 75.0f, 100.0f};
+      if (v <= V[0]) return 0.0f;
+      if (v >= V[4]) return 100.0f;
+      int i = 0;
+      while (v > V[i + 1]) i++;
+      return P[i] + (v - V[i]) / (V[i + 1] - V[i]) * (P[i + 1] - P[i]);
 
 bthome_beken:
   id: ble
