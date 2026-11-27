@@ -6,7 +6,8 @@
 #   A vibration wake sends "vibration on" for 1.5 s, then "vibration off" for
 #   1.5 s, so Home Assistant sees a pulse. Wi-Fi stays OFF; there is no API.
 #   Home Assistant gets the readings through the Bluetooth proxies (BTHome).
-# Update mode: hold the button 5 s while it's awake (press it to wake, keep
+# Update mode: press the button to wake it and keep holding 3 s (works even if
+#   Bluetooth fails), or hold it 5 s while it's awake (press it to wake, keep
 #   holding). It reboots into a Wi-Fi-only boot (no Bluetooth), LED solid, OTA
 #   for 5 min or until the button is pressed, then sleep. The first boot after
 #   a new install is also an update-mode boot.
@@ -85,6 +86,22 @@ esphome:
             then:
               - globals.set: { id: update_req, value: "false" }
               - globals.set: { id: in_update, value: "true" }
+        # Button held at boot (press to wake / power up, keep holding 3 s):
+        # update mode straight away. Doesn't depend on Bluetooth working.
+        - if:
+            condition:
+              lambda: 'return !id(in_update) && digitalRead(PIN_P16) == LOW;'
+            then:
+              - wait_until:
+                  condition:
+                    lambda: 'return digitalRead(PIN_P16) == HIGH;'
+                  timeout: 3s
+              - if:
+                  condition:
+                    lambda: 'return digitalRead(PIN_P16) == LOW;'
+                  then:
+                    - logger.log: "Button held at boot: update mode"
+                    - globals.set: { id: in_update, value: "true" }
         # Update mode is a clean Wi-Fi-only boot: Bluetooth never starts.
         - if:
             condition:
