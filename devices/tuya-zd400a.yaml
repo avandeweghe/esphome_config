@@ -12,7 +12,8 @@
 #   P24 SDA / P9 SCL  MiraMEMS DA217 ("mir3da") accelerometer, I2C 0x26, id 0x13
 #   P6   accelerometer INT1 (motion, active high, latched until cleared)
 #   P16  button (active LOW)          P21  status LED (active HIGH)
-#   P26  tamper (active high)         P20  battery ADC (ADC3), P23 divider enable
+#   P26  accelerometer INT2 (stock "tamper" input; unused here)
+#   P20  battery ADC (ADC3), P23 divider enable
 packages:
   base: !include ../common/base.yaml
   wifi: !include ../common/wifi.yaml
@@ -112,15 +113,6 @@ binary_sensor:
         pulldown: true
     on_press:
       - script.execute: vibration_pulse
-  - platform: gpio
-    id: tamper
-    name: "Tamper"
-    device_class: tamper
-    pin:
-      number: P26
-      mode:
-        input: true
-        pulldown: true
   - platform: gpio
     id: side_button
     name: "Button"
