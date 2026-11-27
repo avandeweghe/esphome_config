@@ -262,6 +262,22 @@ sensor:
       float v = id(battery_voltage).state;
       if (isnan(v)) return {};
       return clamp((v - ${battery_empty}f) / (${battery_full}f - ${battery_empty}f) * 100.0f, 0.0f, 100.0f);
+  # Calibration aids (update mode only): raw ADC voltage at P20, unscaled,
+  # with the battery divider switched on (P23 high) and off.
+  - platform: template
+    id: bat_adc_on
+    name: "Battery ADC Raw"
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    entity_category: diagnostic
+    update_interval: never
+  - platform: template
+    id: bat_adc_off
+    name: "Battery ADC Raw (Divider Off)"
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    entity_category: diagnostic
+    update_interval: never
 
 bthome_beken:
   id: ble
@@ -293,6 +309,26 @@ interval:
             script.is_running: update_mode
           then:
             - output.turn_on: led
+  # Update mode: re-read the battery every 2 s (for calibration on a bench
+  # supply). Normal wakes only read it once, at boot.
+  - interval: 2s
+    then:
+      - if:
+          condition:
+            script.is_running: update_mode
+          then:
+            - output.turn_on: bat_enable
+            - delay: 50ms
+            - lambda: |-
+                float v = id(battery_voltage).sample();
+                id(bat_adc_on).publish_state(v);
+                id(battery_voltage).publish_state(v);  // goes through the multiply filter
+            - output.turn_off: bat_enable
+            - delay: 50ms
+            - lambda: |-
+                float v = id(battery_voltage).sample();
+                id(bat_adc_off).publish_state(v);
+                ESP_LOGI("battery", "ADC raw: divider on %.3f V, off %.3f V", id(bat_adc_on).state, v);
 
 globals:
   - id: update_req
