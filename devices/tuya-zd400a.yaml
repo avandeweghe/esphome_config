@@ -329,6 +329,11 @@ text_sensor:
     id: last_ble_wake
     name: "Last BLE Wake"
     entity_category: diagnostic
+  # DEBUG (temporary): threshold register 0x28 read back from the chip.
+  - platform: template
+    id: accel_ths_reg
+    name: "Accel Threshold Register"
+    entity_category: diagnostic
 
 interval:
   # Update mode: keep the LED solid (a packet blink can otherwise switch it off).
@@ -467,11 +472,18 @@ script:
             ESP_LOGI("accel", "chip 0x%02X, setup %s, wake pin %d, flag 0x%02X -> vibration %s, threshold %u",
                      chip, ok ? "ok" : "FAILED", pin_high, flag, vib ? "YES" : "no", ths);
             id(vibration).publish_state(vib);
+            char s[48];
+            snprintf(s, sizeof(s), "boot: wrote %u, chip has %d", ths, rd(0x28));
+            id(accel_ths_reg).publish_state(s);
           } else if (op == 1) {
             wr(0x20, 0x85);  // clear the latched interrupt (P6 goes low again), keep active high
           } else if (op == 2) {
-            ESP_LOGI("accel", "threshold %u (%.0f mg)", ths, ths * 3.91f);
-            wr(0x28, ths);
+            bool ok = wr(0x28, ths);
+            int back = rd(0x28);
+            ESP_LOGI("accel", "threshold %u (%.0f mg): write %s, chip has %d", ths, ths * 3.91f, ok ? "ok" : "FAILED", back);
+            char s[48];
+            snprintf(s, sizeof(s), "wrote %u (%s), chip has %d", ths, ok ? "ok" : "FAILED", back);
+            id(accel_ths_reg).publish_state(s);
           } else if (op == 3) {
             // Vibration level sample: largest change on any axis since the
             // previous sample, in threshold steps (3.91 mg at ±2 g).
