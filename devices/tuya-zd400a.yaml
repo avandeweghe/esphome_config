@@ -107,6 +107,7 @@ esphome:
             then:
               - delay: 1ms
               - bthome_beken.start: ble
+              - script.execute: ble_watchdog
 
 bk72xx:
   board: t1-u
@@ -278,7 +279,18 @@ bthome_beken:
           - delay: 60ms
           - output.turn_off: led
   on_broadcast:
+    - script.stop: ble_watchdog
+    - lambda: |-
+        id(last_ble) = millis();  // ms from boot to first broadcast (>0 = ok)
+        global_preferences->sync();
     - script.execute: report_then_sleep
+
+text_sensor:
+  # Result of the last normal (Bluetooth) wake, shown in update mode.
+  - platform: template
+    id: last_ble_wake
+    name: "Last BLE Wake"
+    entity_category: diagnostic
 
 interval:
   # Update mode: keep the LED solid (a packet blink can otherwise switch it off).
@@ -291,6 +303,12 @@ interval:
             - output.turn_on: led
 
 globals:
+  # Last Bluetooth wake: >0 = ms to first broadcast, <0 = failed (-1 = BLE
+  # started but never broadcast, -2 = BLE stack never started), 0 = none yet.
+  - id: last_ble
+    type: int
+    restore_value: true
+    initial_value: '0'
   - id: update_req
     type: bool
     restore_value: true
@@ -438,9 +456,31 @@ script:
                 id: sleep_now
                 minutes: 1440
 
+  # Bluetooth didn't start broadcasting within 8 s of a wake: don't hang awake
+  # with Wi-Fi off; note the failure and reboot into Wi-Fi update mode.
+  - id: ble_watchdog
+    mode: single
+    then:
+      - delay: 8s
+      - lambda: |-
+          ESP_LOGW("ble", "No BTHome broadcast 8 s after wake (stack started: %s), going to update mode",
+                   id(ble).is_started() ? "yes" : "no");
+          id(last_ble) = id(ble).is_started() ? -1 : -2;
+          id(update_req) = true;
+          global_preferences->sync();
+          App.safe_reboot();
+
   - id: update_mode
     mode: single
     then:
+      - lambda: |-
+          int v = id(last_ble);
+          char s[64];
+          if (v > 0) snprintf(s, sizeof(s), "ok, broadcast %d ms after boot", v);
+          else if (v == -1) snprintf(s, sizeof(s), "FAILED: BLE started, no broadcast in 8 s");
+          else if (v == -2) snprintf(s, sizeof(s), "FAILED: BLE stack never started");
+          else snprintf(s, sizeof(s), "no Bluetooth wake yet");
+          id(last_ble_wake).publish_state(s);
       - logger.log: "Update mode: Wi-Fi on for 5 min (press the button to end it)"
       - output.turn_on: led
       - wifi.enable:
