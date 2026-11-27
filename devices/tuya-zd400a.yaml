@@ -285,6 +285,17 @@ sensor:
       int i = 0;
       while (v > V[i + 1]) i++;
       return P[i] + (v - V[i]) / (V[i + 1] - V[i]) * (P[i + 1] - P[i]);
+  # Update mode: peak vibration each second, in the same units as "Vibration
+  # Threshold" (3.91 mg steps), to help pick a threshold. Sampled ~10x/s, so
+  # it's a guide: the chip itself compares at 31 Hz.
+  - platform: template
+    id: vibration_level
+    name: "Vibration Level"
+    icon: mdi:sine-wave
+    unit_of_measurement: "steps"
+    accuracy_decimals: 0
+    state_class: measurement
+    update_interval: never
 
 bthome_beken:
   id: ble
@@ -328,8 +339,31 @@ interval:
             script.is_running: update_mode
           then:
             - output.turn_on: led
+  # Update mode: sample the accelerometer for the "Vibration Level" sensor.
+  - interval: 100ms
+    then:
+      - if:
+          condition:
+            script.is_running: update_mode
+          then:
+            - script.execute:
+                id: accel
+                op: 3
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            script.is_running: update_mode
+          then:
+            - lambda: |-
+                id(vibration_level).publish_state(id(vib_peak));
+                id(vib_peak) = 0;
 
 globals:
+  - id: vib_peak
+    type: float
+    restore_value: false
+    initial_value: '0'
   # Last Bluetooth wake: >0 = ms to first broadcast, <0 = failed (-1 = BLE
   # started but never broadcast, -2 = BLE stack never started), 0 = none yet.
   - id: last_ble
@@ -438,6 +472,25 @@ script:
           } else if (op == 2) {
             ESP_LOGI("accel", "threshold %u (%.0f mg)", ths, ths * 3.91f);
             wr(0x28, ths);
+          } else if (op == 3) {
+            // Vibration level sample: largest change on any axis since the
+            // previous sample, in threshold steps (3.91 mg at ±2 g).
+            static int16_t prev[3];
+            static bool have_prev = false;
+            int16_t cur[3];
+            for (int a = 0; a < 3; a++) {
+              int lo = rd(0x02 + 2 * a), hi = rd(0x03 + 2 * a);
+              if (lo < 0 || hi < 0) return;
+              cur[a] = ((int16_t) ((hi << 8) | lo)) >> 2;  // 14 bit, 4096 LSB/g
+            }
+            if (have_prev) {
+              float d = 0;
+              for (int a = 0; a < 3; a++) d = std::max(d, (float) abs(cur[a] - prev[a]));
+              float steps = d * (1000.0f / 4096.0f) / 3.91f;  // LSB -> mg -> threshold steps
+              if (steps > id(vib_peak)) id(vib_peak) = steps;
+            }
+            for (int a = 0; a < 3; a++) prev[a] = cur[a];
+            have_prev = true;
           }
 
   # Update mode: "Vibration" off after 5 s without motion. If the chip has
