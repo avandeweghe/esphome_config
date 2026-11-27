@@ -237,7 +237,6 @@ script:
             binary_sensor.is_on: accel_int
           then:
             - script.execute: vibration_pulse
-            - script.stop: vibration_pulse
       - binary_sensor.template.publish:
           id: vibration
           state: OFF
