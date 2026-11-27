@@ -307,14 +307,17 @@ script:
                    && wr(0x21, 0x07)   // INT1 latched until cleared
                    && wr(0x19, 0x04)   // motion interrupt -> INT1
                    && wr(0x16, 0x07)   // motion interrupt on X/Y/Z
-                   && wr(0x20, 0x80);  // INT1 push-pull active high + clear the latch
+                   // INT1 push-pull, ACTIVE HIGH (bit 0 = 1) + clear the latch (bit 7).
+                   // The datasheet table says 0 = high, but on this chip 0 = active LOW
+                   // (measured: P6 stayed low with the motion flag latched).
+                   && wr(0x20, 0x81);
             ESP_LOGI("accel", "chip 0x%02X, setup %s, threshold %u (%.0f mg)",
                      chip, ok ? "ok" : "FAILED", ths, ths * 3.91f);
             char s[48];
             snprintf(s, sizeof(s), "chip 0x%02X, setup %s", chip < 0 ? 0 : chip, ok ? "ok" : "FAILED");
             id(accel_setup).publish_state(s);
           } else if (op == 1) {
-            wr(0x20, 0x80);  // clear the latched interrupt (P6 goes low again)
+            wr(0x20, 0x81);  // clear the latched interrupt (P6 goes low again), keep active high
           } else if (op == 2) {
             ESP_LOGI("accel", "threshold %u (%.0f mg)", ths, ths * 3.91f);
             wr(0x28, ths);
