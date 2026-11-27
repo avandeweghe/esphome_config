@@ -100,7 +100,9 @@ binary_sensor:
   # Accelerometer INT1: goes high on motion and stays high until cleared.
   - platform: gpio
     id: accel_int
-    internal: true
+    # DEBUG (temporary): visible so the raw P6 level shows in Home Assistant.
+    name: "Accel INT (P6)"
+    entity_category: diagnostic
     pin:
       number: P6
       mode:
@@ -179,7 +181,24 @@ sensor:
     entity_category: diagnostic
     update_interval: never
 
+text_sensor:
+  - platform: template
+    id: accel_setup
+    name: "Accel Setup"
+    entity_category: diagnostic
+  # DEBUG (temporary): accelerometer registers, X/Y/Z and pin levels every 2 s.
+  - platform: template
+    id: accel_debug
+    name: "Accel Debug"
+    entity_category: diagnostic
+
 interval:
+  # DEBUG (temporary)
+  - interval: 2s
+    then:
+      - script.execute:
+          id: accel
+          op: 3
   # Battery reading every 10 s: switch the divider on, sample, switch it off.
   - interval: 10s
     then:
@@ -289,11 +308,42 @@ script:
                    && wr(0x20, 0x80);  // INT1 push-pull active high + clear the latch
             ESP_LOGI("accel", "chip 0x%02X, setup %s, threshold %u (%.0f mg)",
                      chip, ok ? "ok" : "FAILED", ths, ths * 3.91f);
+            char s[48];
+            snprintf(s, sizeof(s), "chip 0x%02X, setup %s", chip < 0 ? 0 : chip, ok ? "ok" : "FAILED");
+            id(accel_setup).publish_state(s);
           } else if (op == 1) {
             wr(0x20, 0x80);  // clear the latched interrupt (P6 goes low again)
           } else if (op == 2) {
             ESP_LOGI("accel", "threshold %u (%.0f mg)", ths, ths * 3.91f);
             wr(0x28, ths);
+          } else if (op == 3) {
+            // DEBUG: registers, live acceleration and pin levels.
+            int r[0x29];
+            for (int i = 0; i < 0x29; i++) r[i] = -1;
+            const uint8_t regs[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09, 0x0B,
+                                    0x0F, 0x10, 0x11, 0x16, 0x19, 0x20, 0x21, 0x27, 0x28};
+            for (uint8_t reg : regs) r[reg] = rd(reg);
+            auto axis = [&](int lo, int hi) -> float {
+              if (lo < 0 || hi < 0) return NAN;
+              int16_t v = (int16_t) ((hi << 8) | lo);
+              return (v >> 2) / 4096.0f;  // 14 bit, ±2 g
+            };
+            float x = axis(r[0x02], r[0x03]), y = axis(r[0x04], r[0x05]), z = axis(r[0x06], r[0x07]);
+            int p6 = digitalRead(PIN_P6);
+            int p26_pd = digitalRead(PIN_P26);
+            pinMode(PIN_P26, INPUT_PULLUP);
+            delayMicroseconds(50);
+            int p26_pu = digitalRead(PIN_P26);
+            pinMode(PIN_P26, INPUT_PULLDOWN);
+            char s[255];
+            snprintf(s, sizeof(s),
+                     "id=%02X x=%.2f y=%.2f z=%.2f flag=%02X act=%02X | 0F=%02X 10=%02X 11=%02X "
+                     "16=%02X 19=%02X 20=%02X 21=%02X 27=%02X 28=%02X | P6=%d P26 pd=%d pu=%d",
+                     r[0x01] & 0xFF, x, y, z, r[0x09] & 0xFF, r[0x0B] & 0xFF, r[0x0F] & 0xFF, r[0x10] & 0xFF,
+                     r[0x11] & 0xFF, r[0x16] & 0xFF, r[0x19] & 0xFF, r[0x20] & 0xFF, r[0x21] & 0xFF,
+                     r[0x27] & 0xFF, r[0x28] & 0xFF, p6, p26_pd, p26_pu);
+            ESP_LOGD("accel", "%s", s);
+            id(accel_debug).publish_state(s);
           }
 
 dashboard_import:
