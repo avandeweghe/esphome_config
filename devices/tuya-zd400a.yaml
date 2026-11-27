@@ -41,9 +41,10 @@ substitutions:
   # Default motion threshold in 3.91 mg steps (±2 g range); 20 = 78 mg.
   # Can be changed in update mode with the "Vibration Threshold" number.
   vibration_threshold: "20"
-  # Battery divider ratio (not calibrated yet) and 2 x AAA empty/full voltages
+  # Battery ADC scale (calibrated 2026-11-26: read 7.21 V at x2.0 with a meter
+  # at 3.00 V, so 2.0 * 3.00 / 7.21) and 2 x AAA empty/full voltages
   # (empty/full from the stock Tuya firmware: min_V 2704, max_V 3106)
-  battery_divider: "2.0"
+  battery_divider: "0.832"
   battery_empty: "2.704"
   battery_full: "3.106"
 
